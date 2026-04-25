@@ -1,0 +1,73 @@
+schema: public
+table: subscriptions
+description: Records representing subscriptions; related to users
+primary_keys:
+- subscription_id
+foreign_keys:
+- column: user_id
+  references:
+    schema: public
+    table: users
+    column: user_id
+example_measures:
+- name: distinct_subscription_id_count
+  sql: COUNT(DISTINCT subscription_id)
+  description: Number of distinct subscription values
+- name: distinct_user_id_count
+  sql: COUNT(DISTINCT user_id)
+  description: Number of distinct user values
+- name: min_start_date
+  sql: MIN(start_date)
+  description: Earliest start date
+- name: max_start_date
+  sql: MAX(start_date)
+  description: Latest start date
+- name: min_end_date
+  sql: MIN(end_date)
+  description: Earliest end date
+- name: max_end_date
+  sql: MAX(end_date)
+  description: Latest end date
+columns:
+  subscription_id:
+    type: int
+    nullable: false
+    description: Identifier for the associated subscription
+    semantic:
+      role: dimension
+      dimension_type: identifier
+  user_id:
+    type: int
+    nullable: false
+    description: Identifier for the associated user
+    semantic:
+      role: dimension
+      dimension_type: identifier
+  plan:
+    type: string
+    nullable: false
+    description: Plan
+    semantic:
+      role: dimension
+      dimension_type: categorical
+  start_date:
+    type: timestamp
+    nullable: false
+    description: Date for start
+    semantic:
+      role: dimension
+      dimension_type: time
+  end_date:
+    type: timestamp
+    nullable: true
+    description: Date for end
+    semantic:
+      role: dimension
+      dimension_type: time
+  status:
+    type: string
+    nullable: false
+    description: Current status
+    semantic:
+      role: dimension
+      dimension_type: categorical

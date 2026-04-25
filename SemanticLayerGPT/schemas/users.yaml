@@ -1,0 +1,44 @@
+schema: public
+table: users
+description: Records representing users
+primary_keys:
+- user_id
+example_measures:
+- name: distinct_user_id_count
+  sql: COUNT(DISTINCT user_id)
+  description: Number of distinct user values
+- name: min_signup_date
+  sql: MIN(signup_date)
+  description: Earliest signup date
+- name: max_signup_date
+  sql: MAX(signup_date)
+  description: Latest signup date
+columns:
+  user_id:
+    type: int
+    nullable: false
+    description: Identifier for the associated user
+    semantic:
+      role: dimension
+      dimension_type: identifier
+  signup_date:
+    type: timestamp
+    nullable: false
+    description: Date for signup
+    semantic:
+      role: dimension
+      dimension_type: time
+  country:
+    type: string
+    nullable: false
+    description: Country
+    semantic:
+      role: dimension
+      dimension_type: categorical
+  device_type:
+    type: string
+    nullable: false
+    description: Device type
+    semantic:
+      role: dimension
+      dimension_type: categorical

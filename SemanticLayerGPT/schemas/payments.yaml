@@ -1,0 +1,65 @@
+schema: public
+table: payments
+description: Records representing payments; related to subscriptions
+primary_keys:
+- payment_id
+foreign_keys:
+- column: subscription_id
+  references:
+    schema: public
+    table: subscriptions
+    column: subscription_id
+example_measures:
+- name: distinct_payment_id_count
+  sql: COUNT(DISTINCT payment_id)
+  description: Number of distinct payment values
+- name: distinct_subscription_id_count
+  sql: COUNT(DISTINCT subscription_id)
+  description: Number of distinct subscription values
+- name: min_payment_date
+  sql: MIN(payment_date)
+  description: Earliest payment date
+- name: max_payment_date
+  sql: MAX(payment_date)
+  description: Latest payment date
+- name: total_amount_usd
+  sql: SUM(amount_usd)
+  description: Total amount usd
+- name: avg_amount_usd
+  sql: AVG(amount_usd)
+  description: Average amount usd
+columns:
+  payment_id:
+    type: int
+    nullable: false
+    description: Identifier for the associated payment
+    semantic:
+      role: dimension
+      dimension_type: identifier
+  subscription_id:
+    type: int
+    nullable: false
+    description: Identifier for the associated subscription
+    semantic:
+      role: dimension
+      dimension_type: identifier
+  payment_date:
+    type: timestamp
+    nullable: false
+    description: Date for payment
+    semantic:
+      role: dimension
+      dimension_type: time
+  amount_usd:
+    type: numeric
+    nullable: false
+    description: Amount usd
+    semantic:
+      role: measure
+  method:
+    type: string
+    nullable: false
+    description: Method
+    semantic:
+      role: dimension
+      dimension_type: categorical

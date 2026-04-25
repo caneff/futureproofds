@@ -1,0 +1,60 @@
+schema: public
+table: sessions
+description: Records representing sessions; related to users
+primary_keys:
+- session_id
+foreign_keys:
+- column: user_id
+  references:
+    schema: public
+    table: users
+    column: user_id
+example_measures:
+- name: distinct_session_id_count
+  sql: COUNT(DISTINCT session_id)
+  description: Number of distinct session values
+- name: distinct_user_id_count
+  sql: COUNT(DISTINCT user_id)
+  description: Number of distinct user values
+- name: min_session_date
+  sql: MIN(session_date)
+  description: Earliest session date
+- name: max_session_date
+  sql: MAX(session_date)
+  description: Latest session date
+columns:
+  session_id:
+    type: int
+    nullable: false
+    description: Identifier for the associated session
+    semantic:
+      role: dimension
+      dimension_type: identifier
+  user_id:
+    type: int
+    nullable: false
+    description: Identifier for the associated user
+    semantic:
+      role: dimension
+      dimension_type: identifier
+  session_date:
+    type: timestamp
+    nullable: false
+    description: Date for session
+    semantic:
+      role: dimension
+      dimension_type: time
+  duration_minutes:
+    type: int
+    nullable: false
+    description: Duration minutes
+    semantic:
+      role: dimension
+      dimension_type: categorical
+  activity_type:
+    type: string
+    nullable: false
+    description: Activity type
+    semantic:
+      role: dimension
+      dimension_type: categorical
