@@ -14,3 +14,4 @@
 - Run `pytest -q` after changes and share results.
 - Confirm before installing new dependencies.
 - Never write secrets, always use environment variables.
+- Always follow the git-workflow skill when committing code or managing branches.
