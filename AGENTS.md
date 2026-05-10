@@ -17,3 +17,8 @@
 - Always follow the git-workflow skill when committing code or managing branches.
 - Use the PostgreSQL MCP Server tools when querying over creating new code yourself.
 - When asked for visualizations, prefer making jupyter notebooks over scripts that generate raw html.
+
+## Testing
+- Use pytest for unit tests.
+- Keep unit tests short, easy to read, and small in scope.
+- Use descriptive names for each test.
