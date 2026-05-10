@@ -63,6 +63,10 @@ uv run python postgres-mcp-server/main.py
 
 Press `Ctrl+C` to stop. No errors = working correctly.
 
+### Unit Tests
+
+Run the unit-test suite from this project (no live database required): `cd postgres-mcp-server && uv run pytest -q`.
+
 ## Available Tools
 
 **`get_schema()`** - Get database schema.
