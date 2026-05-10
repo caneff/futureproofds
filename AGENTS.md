@@ -22,3 +22,4 @@
 - Use pytest for unit tests.
 - Keep unit tests short, easy to read, and small in scope.
 - Use descriptive names for each test.
+

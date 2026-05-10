@@ -70,7 +70,9 @@ Format every commit as:
 - `.ipynb_checkpoints/`
 
 If any of these appear in `git status` or staged changes, stop and remove them
-from tracking before commit.
+from tracking before commit. 
+
+Also remove all output from jupyter notebooks. Notebooks should be free of output.
 
 ## Required Pre-Commit Checks
 
