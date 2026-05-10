@@ -1,3 +1,4 @@
+import functools
 import os
 from typing import Dict, List, TypedDict
 
@@ -44,22 +45,27 @@ def _db_config() -> DBConfig:
     }
 
 
+@functools.lru_cache(maxsize=1)
+def _get_db_config() -> DBConfig:
+    """Load database configuration from environment and keyring (cached after first call)."""
+    return _db_config()
+
+
 # Initializes your MCP server instance. It's used to register your tools.
 mcp = FastMCP("postgres-server")  # type: ignore
-
-DB_CONFIG = _db_config()
 
 
 def _connect() -> psycopg.Connection:
     """Helper function to connect to the database."""
 
     # Typechecking does not like globbing a dict into function arguments, so we destructure it manually.
+    cfg = _get_db_config()
     return psycopg.connect(
-        host=DB_CONFIG["host"],
-        port=DB_CONFIG["port"],
-        user=DB_CONFIG["user"],
-        password=DB_CONFIG["password"],
-        dbname=DB_CONFIG["dbname"],
+        host=cfg["host"],
+        port=cfg["port"],
+        user=cfg["user"],
+        password=cfg["password"],
+        dbname=cfg["dbname"],
     )
 
 
