@@ -20,6 +20,15 @@ dependencies = [
     "psycopg[binary]>=3.3.3",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=8,<9",
+    "pytest-asyncio>=0.24,<1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["postgres-mcp-server"]
+
 [tool.uv]
 package = false
 
