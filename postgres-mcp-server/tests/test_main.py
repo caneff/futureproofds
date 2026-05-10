@@ -3,7 +3,9 @@
 These tests exercise the pure helpers (``_require_env``, ``_db_config``,
 ``_parse_table_identifier``) and the async MCP tools (``execute_sql``,
 ``list_tables``, ``get_schema``) by mocking ``_connect`` so that no real
-PostgreSQL connection is attempted.
+PostgreSQL connection is attempted. Ideally it would be an actual in-memory
+test database connection, but that is too complex to set up for the purposes of
+this project.
 """
 
 from __future__ import annotations
@@ -11,10 +13,8 @@ from __future__ import annotations
 from typing import Tuple
 from unittest.mock import MagicMock
 
-import pytest
-
 import main
-
+import pytest
 
 # ---------------------------------------------------------------------------
 # _require_env
