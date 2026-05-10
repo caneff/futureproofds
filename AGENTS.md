@@ -15,3 +15,5 @@
 - Confirm before installing new dependencies.
 - Never write secrets, always use environment variables.
 - Always follow the git-workflow skill when committing code or managing branches.
+- Use the PostgreSQL MCP Server tools when querying over creating new code yourself.
+- When asked for visualizations, prefer making jupyter notebooks over scripts that generate raw html.
