@@ -19,6 +19,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # 1. Shared State Definition
 # ---------------------------
 
+
 class Action(StrEnum):
     CLEAN_MISSING = "clean_missing"
     REMOVE_OUTLIERS = "remove_outliers"
@@ -44,6 +45,7 @@ llm = ChatOpenAI(model="gpt-4o-mini")
 # 3. Nodes
 # ---------------------------
 
+
 def load_data(state: DataState) -> DataState:
     """Load CSV into DataFrame."""
     state["df"] = pd.read_csv(state["csv_path"])
@@ -53,22 +55,22 @@ def load_data(state: DataState) -> DataState:
 def summarize_data(state: DataState) -> DataState:
     """Generate comprehensive summary including missing values."""
     parts = []
-    
+
     # 1. Basic statistics
     parts.append("DATA DESCRIPTION:\n")
     parts.append(state["df"].describe().to_string())
-    
+
     # 2. Dataset info
     parts.append("\n\nDATA INFO:\n")
     buf = io.StringIO()
     state["df"].info(buf=buf)
     parts.append(buf.getvalue())
-    
+
     # 3. Explicit missing value counts
     parts.append("\n\nMISSING VALUE COUNTS:\n")
     missing_counts = state["df"].isnull().sum()
     parts.append(missing_counts.to_string())
-    
+
     state["summary"] = "\n".join(parts)
     return state
 
@@ -79,8 +81,9 @@ def reasoning_node(state: DataState) -> DataState:
         You are a data science assistant.
         Given this dataset summary, decide which single action is most appropriate:
         'clean_missing', 'remove_outliers', or 'both'.
+        Choose 'both' if both missing values and outliers are present.
 
-        {state['summary']}
+        {state["summary"]}
 
         Respond only with one of: clean_missing, remove_outliers, both.
     """)
@@ -105,7 +108,7 @@ def remove_outliers(state: DataState) -> DataState:
     """Remove outliers using IQR method."""
     df = state["df"].copy()
     numeric_cols = df.select_dtypes(include="number").columns
-    
+
     for col in numeric_cols:
         Q1 = df[col].quantile(0.25)
         Q3 = df[col].quantile(0.75)
@@ -113,7 +116,7 @@ def remove_outliers(state: DataState) -> DataState:
         lower_bound = Q1 - 1.5 * IQR
         upper_bound = Q3 + 1.5 * IQR
         df = df[(df[col] >= lower_bound) & (df[col] <= upper_bound)]
-    
+
     state["df"] = df
     return state
 
@@ -124,20 +127,35 @@ def describe_data(state: DataState) -> DataState:
     return state
 
 
+def do_both(state: DataState) -> DataState:
+    """Clean missing values and remove outliers."""
+    state = handle_missing_values(state)
+    state = remove_outliers(state)
+    return state
+
+
 def output_results(state: DataState):
-    print(f"\n=== ACTION DECIDED: {state['action'].upper()} ===\n")
+    if state["action"] == Action.NONE:
+        print("\n=== NO ACTION TAKEN ===\n")
+        return
+    else:
+        print(f"\n=== ACTION DECIDED: {state['action'].upper()} ===\n")
+
     print(state["summary"])
+    return
 
 
 # ---------------------------
 # 4. Router Function
 # ---------------------------
 
+
 def route_action(state: DataState) -> str:
     """Route based on LLM's chosen action."""
     mapping = {
         Action.CLEAN_MISSING: "handle_missing_values",
         Action.REMOVE_OUTLIERS: "remove_outliers",
+        Action.BOTH: "do_both",
         Action.NONE: "describe_data",
     }
     return mapping.get(state["action"], "describe_data")
@@ -156,17 +174,24 @@ workflow.add_node("handle_missing_values", handle_missing_values)
 workflow.add_node("remove_outliers", remove_outliers)
 workflow.add_node("describe_data", describe_data)
 workflow.add_node("output_results", output_results)
+workflow.add_node("do_both", do_both)
 
 workflow.add_edge(START, "load_data")
 workflow.add_edge("load_data", "summarize_data")
 workflow.add_edge("summarize_data", "reasoning_node")
-workflow.add_conditional_edges("reasoning_node", route_action, {
-    "handle_missing_values": "handle_missing_values",
-    "remove_outliers": "remove_outliers",
-    "describe_data": "describe_data",
-})
+workflow.add_conditional_edges(
+    "reasoning_node",
+    route_action,
+    {
+        "handle_missing_values": "handle_missing_values",
+        "remove_outliers": "remove_outliers",
+        "do_both": "do_both",
+        "describe_data": "describe_data",
+    },
+)
 workflow.add_edge("handle_missing_values", "describe_data")
 workflow.add_edge("remove_outliers", "describe_data")
+workflow.add_edge("do_both", "describe_data")
 workflow.add_edge("describe_data", "output_results")
 workflow.add_edge("output_results", END)
 
@@ -175,6 +200,7 @@ graph = workflow.compile()
 # ---------------------------
 # 6. Visualize Graph
 # ---------------------------
+
 
 def save_graph_visualization():
     """Save the workflow graph as a PNG image."""
@@ -195,12 +221,12 @@ def save_graph_visualization():
 if __name__ == "__main__":
     # Save workflow visualization
     save_graph_visualization()
-    
+
     # Run the workflow
-    csv_path = str(PROJECT_ROOT / "data" / "missing.csv")
+    csv_path = str(PROJECT_ROOT / "data" / "missing_and_outliers.csv")
     init_state: DataState = {
         "csv_path": csv_path,
-        "df": None,
+        "df": pd.DataFrame(),
         "action": Action.NONE,
         "summary": "",
     }
