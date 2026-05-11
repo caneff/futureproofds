@@ -12,9 +12,10 @@ from langgraph.graph import StateGraph, END
 
 from .utils import (
     PythonOutputParser,
-    get_dataframe_summary,
     execute_agent_code,
     fix_agent_code,
+    format_dataframe_summary,
+    get_dataframe_summary,
 )
 
 # Setup
@@ -204,8 +205,10 @@ def make_lightweight_data_cleaning_agent(
         data_raw = state["data_raw"]
         df = pd.DataFrame.from_dict(data_raw)
 
-        dataset_summary = get_dataframe_summary(df)
-        
+        summary = get_dataframe_summary(df)
+        dataset_summary = format_dataframe_summary(summary)
+
+
         data_cleaning_prompt = PromptTemplate(
             template="""
             You are a Data Cleaning Agent. Create a {function_name}(data_raw) function that
