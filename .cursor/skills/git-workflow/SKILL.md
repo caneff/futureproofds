@@ -107,6 +107,7 @@ When asked to "save my work", "commit", "push", or handle git:
 3. Enforce conventional commit format exactly.
 4. Block commits that include secrets, datasets, cache artifacts, or env files.
 5. Prefer safety over speed: keep history reviewable and production-ready.
+6. Ask if detected debug print statements are desired or should be removed.
 
 ## Definition Of Done For Git Hygiene
 
