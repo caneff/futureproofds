@@ -14,76 +14,62 @@ This approach combines the flexibility of LLMs with the reliability of pandas op
 
 ## Setup
 
+Dependencies are managed at the repo root with [uv](https://docs.astral.sh/uv/). Python 3.14 or higher is required.
+
 ### Prerequisites
 
-- **Python 3.9 or higher** (3.9, 3.10, 3.11, 3.12, or 3.13) - **Note**: Python 3.9.7 is not supported due to a Streamlit compatibility issue
-- **Poetry** (dependency manager)
+- **Python 3.14 or higher** (uv will install one automatically if needed)
+- **uv** (dependency manager)
 - **OpenAI API Key**
 
 ### Installation Steps
 
-1. **Install Poetry** (if not already installed):
-   
+1. **Install uv** (if not already installed):
+
    **Windows (PowerShell)**:
    ```powershell
-   (Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | py -
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
    ```
-   
+
    **macOS/Linux**:
    ```bash
-   curl -sSL https://install.python-poetry.org | python3 -
+   curl -LsSf https://astral.sh/uv/install.sh | sh
    ```
-   
-   After installation, restart your terminal. If `poetry` command is not found:
-   - **Windows**: Add `%APPDATA%\Python\Scripts` to your system PATH
-   - **macOS/Linux**: Add `export PATH="$HOME/.local/bin:$PATH"` to your `~/.bashrc` or `~/.zshrc`
 
-2. **Install dependencies**:
+   After installation, restart your terminal.
+
+2. **Install dependencies** (from the repo root):
    ```bash
-   poetry install
+   uv sync
    ```
-   
-   This will install all dependencies with the exact versions specified in `poetry.lock`, ensuring consistency across all environments.
+
+   This will resolve and install all dependencies from `uv.lock`, ensuring consistency across all environments.
 
 3. **Set up your OpenAI API key**:
-   
+
    **Windows**:
    ```powershell
-   copy .env.example .env
+   copy data-cleaning-agent\.env.example data-cleaning-agent\.env
    ```
-   
+
    **macOS/Linux**:
    ```bash
-   cp .env.example .env
+   cp data-cleaning-agent/.env.example data-cleaning-agent/.env
    ```
-   
+
    Then edit `.env` and add your OpenAI API key:
    ```
    OPENAI_API_KEY=sk-your-key-here
    ```
 
-### Multiple Python Versions?
-
-If you have multiple Python versions installed and want to use a specific one:
-
-```bash
-# Tell Poetry which Python to use
-poetry env use python3.11  # or python3.9, python3.10, python3.12, etc.
-
-# Then install dependencies
-poetry install
-```
-
-Poetry will create a virtual environment with your chosen Python version.
-
 ## Usage
 
 ### Streamlit Web Interface
 
-The easiest way to use the agent is through the web interface:
+The easiest way to use the agent is through the web interface (run from the repo root):
 
 ```bash
-poetry run streamlit run app.py
+uv run streamlit run data-cleaning-agent/app.py
 ```
 
 Then:
@@ -136,9 +122,7 @@ data-cleaning-agent/
 │   ├── data_cleaning_agent.py  # Main agent class
 │   └── utils.py                # Utility functions
 ├── app.py                      # Streamlit interface
-├── pyproject.toml              # Dependencies configuration
-├── poetry.lock                 # Locked dependency versions
 └── README.md
 ```
 
-**Important**: The `poetry.lock` file is committed to ensure all users get identical, tested dependency versions.
+Dependencies and the lockfile live at the repo root (`pyproject.toml` and `uv.lock`).
