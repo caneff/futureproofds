@@ -102,7 +102,8 @@ Do not commit if any check fails.
 
 When asked to "save my work", "commit", "push", or handle git:
 
-1. Review changes and group into atomic commit units.
+1. Review changes and group into small atomic commit units.
+  a. If one change is too big, split into smaller units under the same branch if they are all related
 2. Propose split commits if the change mixes unrelated concerns.
 3. Enforce conventional commit format exactly.
 4. Block commits that include secrets, datasets, cache artifacts, or env files.
