@@ -75,13 +75,15 @@ def summarize_data(state: DataState) -> DataState:
 
 def reasoning_node(state: DataState) -> DataState:
     """Use LLM to decide whether to clean missing values or remove outliers."""
-    prompt = (
-        "You are a data science assistant. "
-        "Given this dataset summary, decide which single action is most appropriate: "
-        "'clean_missing', 'remove_outliers', or 'both'.\n\n"
-        f"{state['summary']}\n\n"
-        "Respond only with one of: clean_missing, remove_outliers, both."
-    )
+    prompt = textwrap.dedent(f"""\
+        You are a data science assistant.
+        Given this dataset summary, decide which single action is most appropriate:
+        'clean_missing', 'remove_outliers', or 'both'.
+
+        {state['summary']}
+
+        Respond only with one of: clean_missing, remove_outliers, both.
+    """)
     decision = llm.invoke(prompt).text.strip().lower()
     try:
         state["action"] = Action(decision)
