@@ -21,26 +21,23 @@ The workflow follows these steps:
 
 ## Setup
 
+Dependencies are managed at the repo root with [uv](https://docs.astral.sh/uv/). Python 3.14 or higher is required.
+
 ### Windows (PowerShell)
 
-1. **Verify Python is installed** (Python 3.9 or higher required):
+1. **Install uv** (if not already installed):
    ```powershell
-   python --version
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
    ```
-   If not installed, download from [python.org](https://www.python.org/downloads/)
+   After installation, restart your terminal.
 
-2. **Install Poetry**:
+2. **Install dependencies** (from the repo root):
    ```powershell
-   (Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | py -
+   uv sync
    ```
-   After installation, restart your terminal or IDE. If `poetry` command is not found, add `%APPDATA%\Python\Scripts` to your system PATH.
+   This will also install a matching Python interpreter if one isn't found.
 
-3. **Install dependencies**:
-   ```powershell
-   poetry install
-   ```
-
-4. **Set up your OpenAI API key**:
+3. **Set up your OpenAI API key**:
    ```powershell
    copy .env.example .env
    ```
@@ -48,14 +45,14 @@ The workflow follows these steps:
 
 ### macOS/Linux
 
-1. **Install Poetry** (if not already installed):
+1. **Install uv** (if not already installed):
    ```bash
-   curl -sSL https://install.python-poetry.org | python3 -
+   curl -LsSf https://astral.sh/uv/install.sh | sh
    ```
 
-2. **Install dependencies**:
+2. **Install dependencies** (from the repo root):
    ```bash
-   poetry install
+   uv sync
    ```
 
 3. **Set up your OpenAI API key**:
@@ -66,14 +63,14 @@ The workflow follows these steps:
 
 ## Running the Example
 
-From the project root:
+From the repo root:
 ```bash
-poetry run python workflows/simple_clean_data_workflow.py
+uv run python simple-data-cleaning-langgraph-workflow/workflows/simple_clean_data_workflow.py
 ```
 
 The workflow will:
 1. Save a workflow graph visualization to `outputs/workflow_graph.png`
-2. Load data from `data/missing.csv` (you can change this in the script)
+2. Load data from `data/missing_and_outliers.csv` (you can change this in the script)
 3. Use an LLM to analyze the data and decide which cleaning action to take
 4. Execute the appropriate cleaning steps
 5. Display the results
@@ -83,7 +80,6 @@ The workflow will:
 ```
 .
 ├── README.md
-├── pyproject.toml
 ├── .env.example
 ├── .gitignore
 │
