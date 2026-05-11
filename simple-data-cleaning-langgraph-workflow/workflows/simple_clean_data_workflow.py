@@ -88,8 +88,6 @@ def reasoning_node(state: DataState) -> DataState:
         Respond only with one of: clean_missing, remove_outliers, both.
     """)
     decision = llm.invoke(prompt).text.strip().lower()
-    print(f"Decision: {decision}")
-
     try:
         state["action"] = Action(decision)
     except ValueError:
@@ -138,7 +136,7 @@ def do_both(state: DataState) -> DataState:
 
 def output_results(state: DataState):
     if state["action"] == Action.NONE:
-        print(f"\n=== NO ACTION TAKEN ===\n")
+        print("\n=== NO ACTION TAKEN ===\n")
         return
     else:
         print(f"\n=== ACTION DECIDED: {state['action'].upper()} ===\n")
