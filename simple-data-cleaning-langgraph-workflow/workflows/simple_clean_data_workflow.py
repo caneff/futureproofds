@@ -1,12 +1,13 @@
 import io
 import textwrap
+from enum import StrEnum
 from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
-from typing_extensions import Literal, TypedDict
+from typing_extensions import TypedDict
 
 # Load environment variables from .env file
 load_dotenv()
@@ -18,10 +19,17 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # 1. Shared State Definition
 # ---------------------------
 
+class Action(StrEnum):
+    CLEAN_MISSING = "clean_missing"
+    REMOVE_OUTLIERS = "remove_outliers"
+    BOTH = "both"
+    NONE = "none"
+
+
 class DataState(TypedDict):
     csv_path: str
     df: pd.DataFrame
-    action: Literal["clean_missing", "remove_outliers", "both"]
+    action: Action
     summary: str
 
 
@@ -75,9 +83,10 @@ def reasoning_node(state: DataState) -> DataState:
         "Respond only with one of: clean_missing, remove_outliers, both."
     )
     decision = llm.invoke(prompt).text.strip().lower()
-    if decision not in ["clean_missing", "remove_outliers", "both"]:
-        decision = "none"
-    state["action"] = decision
+    try:
+        state["action"] = Action(decision)
+    except ValueError:
+        state["action"] = Action.NONE
     return state
 
 
@@ -125,9 +134,9 @@ def output_results(state: DataState):
 def route_action(state: DataState) -> str:
     """Route based on LLM's chosen action."""
     mapping = {
-        "clean_missing": "handle_missing_values",
-        "remove_outliers": "remove_outliers",
-        "none": "describe_data",
+        Action.CLEAN_MISSING: "handle_missing_values",
+        Action.REMOVE_OUTLIERS: "remove_outliers",
+        Action.NONE: "describe_data",
     }
     return mapping.get(state["action"], "describe_data")
 
@@ -190,7 +199,7 @@ if __name__ == "__main__":
     init_state: DataState = {
         "csv_path": csv_path,
         "df": None,
-        "action": "none",
+        "action": Action.NONE,
         "summary": "",
     }
     graph.invoke(init_state)
