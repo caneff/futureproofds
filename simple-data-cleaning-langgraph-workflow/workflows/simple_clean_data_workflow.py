@@ -172,7 +172,7 @@ def save_graph_visualization():
         output_path = PROJECT_ROOT / "outputs" / "workflow_graph.png"
         with open(output_path, "wb") as f:
             f.write(png_data)
-        print(f"Workflow graph saved to outputs/workflow_graph.png\n")
+        print("Workflow graph saved to outputs/workflow_graph.png\n")
     except Exception as e:
         print(f"Could not generate graph visualization: {e}\n")
 
