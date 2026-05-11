@@ -74,7 +74,7 @@ def reasoning_node(state: DataState) -> DataState:
         f"{state['summary']}\n\n"
         "Respond only with one of: clean_missing, remove_outliers, both."
     )
-    decision = llm.invoke(prompt).content.strip().lower()
+    decision = llm.invoke(prompt).text.strip().lower()
     if decision not in ["clean_missing", "remove_outliers", "both"]:
         decision = "none"
     state["action"] = decision
