@@ -1,11 +1,12 @@
 # Libraries
-from typing import TypedDict
+from typing import Required, TypedDict
 import os
 import logging
 
 import pandas as pd
 
 from langchain_core.prompts import PromptTemplate
+from langchain_core.runnables import RunnableConfig
 from langgraph.types import Checkpointer
 from langgraph.graph import StateGraph, END
 
@@ -20,6 +21,21 @@ from .utils import (
 logger = logging.getLogger(__name__)
 AGENT_NAME = "lightweight_data_cleaning_agent"
 LOG_PATH = os.path.join(os.getcwd(), "logs/")
+
+
+# State schema for the workflow graph. total=False because nodes incrementally
+# populate keys (data_cleaner_function, data_cleaned, data_cleaner_error, ...)
+# during the run rather than requiring all keys up front.
+class GraphState(TypedDict, total=False):
+    user_instructions: Required[str | None]
+    data_raw: Required[dict]
+    max_retries: Required[int]
+    retry_count: Required[int]
+    data_cleaned: dict
+    data_cleaner_function: str
+    data_cleaner_function_path: str
+    data_cleaner_function_name: str
+    data_cleaner_error: str
 
 
 class LightweightDataCleaningAgent:
@@ -76,10 +92,17 @@ class LightweightDataCleaningAgent:
             checkpointer=checkpointer
         )
     
-    def invoke_agent(self, data_raw: pd.DataFrame, user_instructions: str=None, max_retries:int=3, retry_count:int=0, **kwargs):
+    def invoke_agent(
+        self,
+        data_raw: pd.DataFrame,
+        user_instructions: str | None = None,
+        max_retries: int = 3,
+        retry_count: int = 0,
+        config: RunnableConfig | None = None,
+    ) -> None:
         """
         Generate and execute data cleaning code on the provided DataFrame.
-        
+
         Parameters
         ----------
         data_raw : pd.DataFrame
@@ -92,22 +115,22 @@ class LightweightDataCleaningAgent:
             Maximum number of retry attempts if generated code fails.
         retry_count : int, default=0
             Starting retry count (typically left at 0).
-        **kwargs
-            Additional arguments passed to the underlying graph invoke method.
-        
+        config : RunnableConfig, optional
+            LangChain runtime config (e.g. ``{"configurable": {"thread_id": ...}}``)
+            forwarded to the underlying graph ``invoke`` call.
+
         Returns
         -------
         None
             Results are stored in self.response and accessed via getter methods.
         """
-        response = self._compiled_graph.invoke({
+        initial_state: GraphState = {
             "user_instructions": user_instructions,
             "data_raw": data_raw.to_dict(),
             "max_retries": max_retries,
             "retry_count": retry_count,
-        }, **kwargs)
-        self.response = response  # Store full workflow response for getter methods
-        return None
+        }
+        self.response = self._compiled_graph.invoke(initial_state, config=config)
     
     def get_data_cleaned(self):
         """
@@ -168,32 +191,17 @@ def make_lightweight_data_cleaning_agent(
         Compiled LangGraph workflow ready to process cleaning requests.
     """
     # Setup Log Directory
-    if log:
-        if log_path is None:
-            log_path = LOG_PATH
-        if not os.path.exists(log_path):
-            os.makedirs(log_path)    
+    log_dir: str = log_path if log_path is not None else LOG_PATH
+    if log and not os.path.exists(log_dir):
+        os.makedirs(log_dir)
 
-    # Define state schema for the workflow graph
-    class GraphState(TypedDict):
-        user_instructions: str
-        data_raw: dict
-        data_cleaned: dict
-        data_cleaner_function: str
-        data_cleaner_function_path: str
-        data_cleaner_function_name: str
-        data_cleaner_error: str
-        max_retries: int
-        retry_count: int
-
-    
     def create_data_cleaner_code(state: GraphState):
         """
         Generate the data cleaning code based on user instructions.
         """
         logger.info("Creating data cleaner code")
-        
-        data_raw = state.get("data_raw")
+
+        data_raw = state["data_raw"]
         df = pd.DataFrame.from_dict(data_raw)
 
         dataset_summary = get_dataframe_summary(df)
@@ -238,7 +246,7 @@ def make_lightweight_data_cleaning_agent(
         # Simple logging if enabled
         file_path = None
         if log:
-            file_path = os.path.join(log_path, file_name)
+            file_path = os.path.join(log_dir, file_name)
             with open(file_path, 'w') as f:
                 f.write(response)
             logger.info(f"Code saved to: {file_path}")
