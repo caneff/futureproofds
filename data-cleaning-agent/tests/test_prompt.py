@@ -27,3 +27,8 @@ class TestCleaningPromptGuardrails:
         assert "abs(skew_val)" in _DATA_CLEANING_PROMPT_TEMPLATE
         assert "SCALAR" in _DATA_CLEANING_PROMPT_TEMPLATE
         assert "skew().abs()" not in _DATA_CLEANING_PROMPT_TEMPLATE
+
+    def test_forbids_chained_inplace_assignment(self):
+        assert "Never use chained-assignment with inplace=True" in _DATA_CLEANING_PROMPT_TEMPLATE
+        assert "df[col] = df[col].fillna(value)" in _DATA_CLEANING_PROMPT_TEMPLATE
+        assert "ChainedAssignmentError" in _DATA_CLEANING_PROMPT_TEMPLATE

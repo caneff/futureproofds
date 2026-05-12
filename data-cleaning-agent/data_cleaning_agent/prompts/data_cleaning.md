@@ -10,6 +10,15 @@ Hard constraints:
   Treat those as protected (target/id columns).
 - Preserve original column order except for columns that are dropped.
 - Reset the index at the end after any row drops.
+- Never use chained-assignment with inplace=True. Under pandas Copy-on-Write,
+  `df[col].fillna(value, inplace=True)` (and similar `.method(inplace=True)`
+  calls on a column selection) silently no-ops and raises
+  ChainedAssignmentError. Always reassign instead:
+      df[col] = df[col].fillna(value)
+      df[col] = df[col].replace(old, new)
+      df[col] = df[col].astype(dtype)
+  If you genuinely need inplace, call it on the parent DataFrame with a dict
+  mapping, e.g. `df.fillna({col: value}, inplace=True)`.
 
 Pipeline (in order):
 1. df = data_raw.copy().
