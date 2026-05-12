@@ -1,0 +1,11 @@
+{
+  "executionEnvironments": [
+    {
+      "root": "data-cleaning-agent",
+      "extraPaths": [
+        "data-cleaning-agent",
+        "data-cleaning-agent/.venv/Lib/site-packages"
+      ]
+    }
+  ]
+}
