@@ -1,0 +1,38 @@
+[project]
+name = "data-cleaning-agent"
+version = "0.1.0"
+description = "Lightweight LangGraph-based data cleaning agent with a Streamlit UI"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "langchain>=0.3.0",
+    "langchain-openai>=0.1.0",
+    "langgraph>=0.2.0",
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "streamlit>=1.28.0",
+    "typing-extensions>=4.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+addopts = ["--strict-markers"]
+markers = [
+    "unit: fast in-process tests with no external services",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.build-backend]
+module-root = ""
+
+[build-system]
+requires = ["uv_build>=0.11.7,<0.12.0"]
+build-backend = "uv_build"
