@@ -1,6 +1,8 @@
 import pandas as pd
 import pytest
 
+from data_cleaning_agent.utils import get_dataframe_summary
+
 
 @pytest.fixture
 def mixed_df() -> pd.DataFrame:
@@ -13,3 +15,27 @@ def mixed_df() -> pd.DataFrame:
         "income_str": ["$50,000", "$60,000", "$70,000", "$55,000", "$65,000"],
         "is_active": ["yes", "no", "yes", "yes", "no"],
     })
+
+
+@pytest.fixture
+def summary(mixed_df):
+    """Cached DataFrameSummary so each test reuses one computation."""
+    return get_dataframe_summary(mixed_df)
+
+
+@pytest.fixture
+def empty_df() -> pd.DataFrame:
+    """Zero-row DataFrame for empty-input edge cases."""
+    return pd.DataFrame({"a": pd.Series(dtype="float64")})
+
+
+@pytest.fixture
+def monotonic_int_df() -> pd.DataFrame:
+    """Strictly increasing int column whose name does NOT end in id/uuid."""
+    return pd.DataFrame({"counter": [10, 20, 30, 40]})
+
+
+@pytest.fixture
+def small_numeric_df() -> pd.DataFrame:
+    """Single-row numeric column to exercise skew/std NaN -> 0.0 coercion."""
+    return pd.DataFrame({"x": [42.0]})
