@@ -1,4 +1,6 @@
 import pytest
+from langchain_core.prompts import PromptTemplate
+
 from data_cleaning_agent.data_cleaning_agent import (
     _DATA_CLEANING_PROMPT_TEMPLATE,
     _PROMPT_PATH,
@@ -32,3 +34,17 @@ class TestCleaningPromptGuardrails:
         assert "Never use chained-assignment with inplace=True" in _DATA_CLEANING_PROMPT_TEMPLATE
         assert "df[col] = df[col].fillna(value)" in _DATA_CLEANING_PROMPT_TEMPLATE
         assert "ChainedAssignmentError" in _DATA_CLEANING_PROMPT_TEMPLATE
+
+    def test_template_renders_with_only_expected_variables(self):
+        """All unescaped {braces} must be one of the three expected placeholders."""
+        prompt = PromptTemplate(
+            template=_DATA_CLEANING_PROMPT_TEMPLATE,
+            input_variables=["user_instructions", "all_datasets_summary", "function_name"],
+        )
+        rendered = prompt.format(
+            user_instructions="<u>",
+            all_datasets_summary="<s>",
+            function_name="data_cleaner",
+        )
+        assert "{col: value}" in rendered
+        assert "data_cleaner(data_raw)" in rendered

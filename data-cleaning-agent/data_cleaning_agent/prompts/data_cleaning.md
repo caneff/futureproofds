@@ -18,7 +18,7 @@ Hard constraints:
       df[col] = df[col].replace(old, new)
       df[col] = df[col].astype(dtype)
   If you genuinely need inplace, call it on the parent DataFrame with a dict
-  mapping, e.g. `df.fillna({col: value}, inplace=True)`.
+  mapping, e.g. `df.fillna({{col: value}}, inplace=True)`.
 
 Pipeline (in order):
 1. df = data_raw.copy().
