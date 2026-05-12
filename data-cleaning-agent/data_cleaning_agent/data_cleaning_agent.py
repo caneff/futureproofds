@@ -113,9 +113,10 @@ class LightweightDataCleaningAgent:
         data_raw : pd.DataFrame
             Raw dataset to clean.
         user_instructions : str, optional
-            Custom cleaning instructions. If None, applies default cleaning steps:
-            removing columns with >40% missing values, imputing missing values,
-            and removing duplicates.
+            Free-form cleaning instructions. Columns named here are treated as
+            protected and exempt from drops and destructive transforms. When
+            None, the agent applies its full default pipeline. The pipeline is
+            defined in ``data_cleaning_agent/prompts/data_cleaning.md``.
         max_retries : int, default=3
             Maximum number of retry attempts if generated code fails.
         retry_count : int, default=0

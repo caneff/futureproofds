@@ -109,7 +109,7 @@ cleaned_df.to_csv("cleaned_data.csv", index=False)
 # Give specific cleaning instructions to the agent
 agent.invoke_agent(
     data_raw=df,
-    user_instructions="Remove columns with more than 30% missing values and standardize date formats"
+    user_instructions="Remove columns with more than 30% missing values and standardize date formats",
 )
 ```
 
@@ -120,9 +120,15 @@ data-cleaning-agent/
 ├── data_cleaning_agent/
 │   ├── __init__.py
 │   ├── data_cleaning_agent.py  # Main agent class
+│   ├── prompts/
+│   │   └── data_cleaning.md    # LLM prompt + default cleaning pipeline
 │   └── utils.py                # Utility functions
 ├── app.py                      # Streamlit interface
 └── README.md
 ```
+
+The default 14-step pipeline that runs when no `user_instructions` are
+provided is defined in
+[`data_cleaning_agent/prompts/data_cleaning.md`](data_cleaning_agent/prompts/data_cleaning.md).
 
 Dependencies and the lockfile live at the repo root (`pyproject.toml` and `uv.lock`).
