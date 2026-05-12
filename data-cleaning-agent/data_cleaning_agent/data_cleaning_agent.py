@@ -1,14 +1,14 @@
 # Libraries
-from typing import Required, TypedDict
-import os
 import logging
+import os
+from pathlib import Path
+from typing import Required, TypedDict
 
 import pandas as pd
-
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnableConfig
+from langgraph.graph import END, StateGraph
 from langgraph.types import Checkpointer
-from langgraph.graph import StateGraph, END
 
 from .utils import (
     PythonOutputParser,
@@ -22,6 +22,10 @@ from .utils import (
 logger = logging.getLogger(__name__)
 AGENT_NAME = "lightweight_data_cleaning_agent"
 LOG_PATH = os.path.join(os.getcwd(), "logs/")
+
+
+_PROMPT_PATH = Path(__file__).parent / "prompts" / "data_cleaning.md"
+_DATA_CLEANING_PROMPT_TEMPLATE = _PROMPT_PATH.read_text(encoding="utf-8")
 
 
 # State schema for the workflow graph. total=False because nodes incrementally
@@ -42,10 +46,10 @@ class GraphState(TypedDict, total=False):
 class LightweightDataCleaningAgent:
     """
     LLM-powered agent that generates and executes Python code to clean pandas DataFrames.
-    
+
     Uses an LLM to create data cleaning functions based on user instructions. The agent
     automatically retries with error correction if the generated code fails.
-    
+
     Parameters
     ----------
     model : LLM
@@ -60,21 +64,21 @@ class LightweightDataCleaningAgent:
         Name of the generated cleaning function.
     checkpointer : Checkpointer, optional
         LangGraph checkpointer for saving agent state.
-    
+
     Attributes
     ----------
     response : dict or None
         Stores the full response after invoke_agent() is called.
     """
-    
+
     def __init__(
-        self, 
-        model, 
-        log=False, 
-        log_path=None, 
-        file_name="data_cleaner.py", 
+        self,
+        model,
+        log=False,
+        log_path=None,
+        file_name="data_cleaner.py",
         function_name="data_cleaner",
-        checkpointer: Checkpointer = None
+        checkpointer: Checkpointer = None,
     ):
         self.model = model
         self.log = log
@@ -90,9 +94,9 @@ class LightweightDataCleaningAgent:
             log_path=log_path,
             file_name=file_name,
             function_name=function_name,
-            checkpointer=checkpointer
+            checkpointer=checkpointer,
         )
-    
+
     def invoke_agent(
         self,
         data_raw: pd.DataFrame,
@@ -132,21 +136,21 @@ class LightweightDataCleaningAgent:
             "retry_count": retry_count,
         }
         self.response = self._compiled_graph.invoke(initial_state, config=config)
-    
+
     def get_data_cleaned(self):
         """
         Retrieves the cleaned data stored after running invoke_agent.
         """
         if self.response:
             return pd.DataFrame(self.response.get("data_cleaned"))
-        
+
     def get_data_raw(self):
         """
         Retrieves the raw data.
         """
         if self.response:
             return pd.DataFrame(self.response.get("data_raw"))
-    
+
     def get_data_cleaner_function(self):
         """
         Retrieves the agent's cleaning function code.
@@ -157,20 +161,21 @@ class LightweightDataCleaningAgent:
 
 # Agent Factory Function
 
+
 def make_lightweight_data_cleaning_agent(
-    model, 
-    log=False, 
-    log_path=None, 
+    model,
+    log=False,
+    log_path=None,
     file_name="data_cleaner.py",
     function_name="data_cleaner",
-    checkpointer: Checkpointer = None
+    checkpointer: Checkpointer = None,
 ):
     """
     Factory function that creates a compiled LangGraph workflow for data cleaning.
-    
+
     Builds a state graph with three nodes: code generation, execution, and error fixing.
     The workflow automatically retries with corrections if generated code fails.
-    
+
     Parameters
     ----------
     model : LLM
@@ -185,7 +190,7 @@ def make_lightweight_data_cleaning_agent(
         Name of the generated cleaning function.
     checkpointer : Checkpointer, optional
         LangGraph checkpointer for saving workflow state.
-    
+
     Returns
     -------
     CompiledStateGraph
@@ -208,98 +213,38 @@ def make_lightweight_data_cleaning_agent(
         summary = get_dataframe_summary(df)
         dataset_summary = format_dataframe_summary(summary)
 
-
         data_cleaning_prompt = PromptTemplate(
-            template="""
-            You are a Data Cleaning Agent. Create a {function_name}(data_raw) function that
-            returns a cleaned pandas DataFrame.
-
-            Follow these rules strictly. Do not reorder steps. Do not skip steps.
-
-            Hard constraints:
-            - Start with: df = data_raw.copy(). Never mutate data_raw.
-            - Be deterministic. Do not use randomness. If you must, seed it with 0.
-            - Never drop or destructively transform any column named in User Instructions.
-              Treat those as protected (target/id columns).
-            - Preserve original column order except for columns that are dropped.
-            - Reset the index at the end after any row drops.
-
-            Pipeline (in order):
-            1. df = data_raw.copy().
-            2. Normalize column names: lowercase, strip, replace non-alphanumeric runs with
-               a single underscore.
-            3. For object/string columns, strip leading/trailing whitespace. For columns
-               that look like categorical labels (not free text), also casefold values.
-            4. Replace placeholder strings with NaN in object columns:
-               "", "N/A", "n/a", "NA", "null", "NULL", "None", "?", "missing", "-", "unknown".
-            5. Coerce dtypes where the column clearly fits:
-               - Date-like strings: pd.to_datetime(col, errors="coerce").
-               - Numeric-looking strings (currency, percent, thousands separators): strip
-                 "$", ",", "%" then pd.to_numeric(col, errors="coerce").
-               - Boolean-like strings ("yes"/"no", "true"/"false", "t"/"f", "0"/"1"): map to bool.
-            6. Drop columns with more than 40% missing values, EXCEPT any column listed
-               in User Instructions.
-            7. Drop columns that are constant (one unique non-null value) or 100% NaN.
-            8. Identify ID-like columns (cardinality == len(df), name ends with "id" or
-               "uuid", or strictly monotonically increasing integers). Exempt them from
-               steps 9, 10, and 11 (categorical detection, rare-bucketing, imputation).
-               Do not drop them.
-            9. Convert columns with fewer than 10 unique values (after step 3
-               canonicalization) into pd.Categorical with the observed categories.
-            10. For each categorical column, bucket categories whose frequency is below
-                1% into a single "other" category. Keep a "_raw" version of any
-                categorical variable where you make an "other" category so original
-                categories are not lost.
-            11. Impute missing values:
-                - Numeric columns: use median if abs(skew) > 1, otherwise mean.
-                - Categorical/object columns: use mode if missing fraction <= 20%,
-                  otherwise add and use an "unknown" sentinel category.
-            12. Drop rows that are entirely NaN: df.dropna(how="all").
-            13. Drop exact duplicate rows: df.drop_duplicates().
-            14. df = df.reset_index(drop=True).
-
-            User Instructions:
-            {user_instructions}
-
-            Dataset Summary:
-            {all_datasets_summary}
-
-            Return Python code in ```python``` format with a single function:
-
-            def {function_name}(data_raw):
-                import pandas as pd
-                import numpy as np
-                # Your cleaning code here, following the pipeline above in order.
-                return data_cleaned
-
-            Important: when fit_transform()-style outputs need to be assigned to a
-            DataFrame column, flatten with .ravel() first.
-            """,
-            input_variables=["user_instructions", "all_datasets_summary", "function_name"]
+            template=_DATA_CLEANING_PROMPT_TEMPLATE,
+            input_variables=[
+                "user_instructions",
+                "all_datasets_summary",
+                "function_name",
+            ],
         )
 
         data_cleaning_agent = data_cleaning_prompt | model | PythonOutputParser()
-        
+
         response = data_cleaning_agent.invoke({
-            "user_instructions": state.get("user_instructions") or "Follow the basic cleaning steps.",
+            "user_instructions": state.get("user_instructions")
+            or "Follow the basic cleaning steps.",
             "all_datasets_summary": dataset_summary,
-            "function_name": function_name
+            "function_name": function_name,
         })
-        
+
         # Simple logging if enabled
         file_path = None
         if log:
             file_path = os.path.join(log_dir, file_name)
-            with open(file_path, 'w') as f:
+            with open(file_path, "w") as f:
                 f.write(response)
             logger.info(f"Code saved to: {file_path}")
-   
+
         return {
             "data_cleaner_function": response,
             "data_cleaner_function_path": file_path,
             "data_cleaner_function_name": function_name,
         }
-        
+
     def execute_data_cleaner_code(state):
         """
         Execute the generated cleaning code on the data.
@@ -310,9 +255,9 @@ def make_lightweight_data_cleaning_agent(
             result_key="data_cleaned",
             error_key="data_cleaner_error",
             code_snippet_key="data_cleaner_function",
-            agent_function_name=state.get("data_cleaner_function_name")
+            agent_function_name=state.get("data_cleaner_function_name"),
         )
-        
+
     def fix_data_cleaner_code(state: GraphState):
         """
         Fix errors in the generated data cleaning code.
@@ -333,26 +278,26 @@ def make_lightweight_data_cleaning_agent(
             state=state,
             code_snippet_key="data_cleaner_function",
             error_key="data_cleaner_error",
-            llm=model,  
+            llm=model,
             prompt_template=data_cleaner_prompt,
             function_name=state.get("data_cleaner_function_name"),
         )
 
     # Build the workflow graph
     workflow = StateGraph(GraphState)
-    
+
     # Add nodes
     workflow.add_node("create_data_cleaner_code", create_data_cleaner_code)
     workflow.add_node("execute_data_cleaner_code", execute_data_cleaner_code)
     workflow.add_node("fix_data_cleaner_code", fix_data_cleaner_code)
-    
+
     # Set entry point
     workflow.set_entry_point("create_data_cleaner_code")
-    
+
     # Add edges
     workflow.add_edge("create_data_cleaner_code", "execute_data_cleaner_code")
     workflow.add_edge("fix_data_cleaner_code", "execute_data_cleaner_code")
-    
+
     # Conditional routing: retry with fixes if error occurs and retries remain
     def should_retry(state):
         has_error = state.get("data_cleaner_error") is not None
@@ -362,7 +307,7 @@ def make_lightweight_data_cleaning_agent(
             and state["retry_count"] < state["max_retries"]
         )
         return "fix_code" if (has_error and can_retry) else "end"
-    
+
     workflow.add_conditional_edges(
         "execute_data_cleaner_code",
         should_retry,
@@ -371,8 +316,8 @@ def make_lightweight_data_cleaning_agent(
             "end": END,
         },
     )
-    
+
     # Compile the workflow
     app = workflow.compile(checkpointer=checkpointer, name=AGENT_NAME)
-    
+
     return app
