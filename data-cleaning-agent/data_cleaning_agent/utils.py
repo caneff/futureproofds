@@ -95,10 +95,10 @@ def _sample_values(series: pd.Series, n: int = 3) -> list[Any]:
 
 def _numeric_stats(series: pd.Series) -> NumericStats:
     """Compute summary stats for a numeric column. Skew is coerced to 0.0 when undefined."""
-    skew = series.skew()
+    skew = float(series.skew())
     if pd.isna(skew):
         skew = 0.0
-    std = series.std()
+    std = float(series.std())
     if pd.isna(std):
         std = 0.0
     return NumericStats(
@@ -106,8 +106,8 @@ def _numeric_stats(series: pd.Series) -> NumericStats:
         max=round(float(series.max()), 4),
         mean=round(float(series.mean()), 4),
         median=round(float(series.median()), 4),
-        std=round(float(std), 4),
-        skew=round(float(skew), 4),
+        std=round(std, 4),
+        skew=round(skew, 4),
     )
 
 
@@ -150,7 +150,7 @@ def _detect_numeric_string_like(series: pd.Series) -> bool:
     if non_null.empty:
         return False
     cleaned = non_null.astype(str).str.replace(r"[$,%\s]", "", regex=True)
-    parsed = pd.to_numeric(cleaned, errors="coerce")
+    parsed = pd.Series(pd.to_numeric(cleaned, errors="coerce"))
     return bool(parsed.notna().mean() >= 0.9)
 
 
@@ -219,7 +219,15 @@ def get_dataframe_summary(df: pd.DataFrame) -> DataFrameSummary:
         mapping column name to ``ColumnSummary`` (preserving input column order).
     """
     n_rows = len(df)
-    columns = {name: _summarize_column(name, df[name], n_rows) for name in df.columns}
+    columns: dict[str, ColumnSummary] = {}
+    # Duplicate column labels make ``df[name]`` a DataFrame, not a Series; type
+    # checkers and ``_summarize_column`` expect a single Series, so we walk
+    # columns in order and take the first duplicate when needed.
+    for name in df.columns:
+        col = df[name]
+        if isinstance(col, pd.DataFrame):
+            col = col.iloc[:, 0]
+        columns[name] = _summarize_column(name, col, n_rows)
     return DataFrameSummary(n_rows=n_rows, n_cols=len(df.columns), columns=columns)
 
 

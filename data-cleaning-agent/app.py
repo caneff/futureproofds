@@ -39,7 +39,9 @@ if uploaded_file:
             llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
             agent = LightweightDataCleaningAgent(model=llm, log=True)
             df_input = df_raw.copy()
-            df_input.insert(0, AGENT_ROW_ID, range(len(df_input)))
+            df_input.insert(
+                0, AGENT_ROW_ID, pd.RangeIndex(stop=len(df_input), dtype="int64")
+            )
             supplemental_instructions = (
                 f'The column "{AGENT_ROW_ID}" is a synthetic stable row identifier '
                 "added by the application before cleaning. Do not drop it, rename it, "
