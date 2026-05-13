@@ -22,6 +22,10 @@ from preview_helpers import (
     reorder_cleaned_for_export,
     style_preview_pair,
 )
+from cleaning_outcome_summary import (
+    build_cleaning_outcome_facts,
+    format_outcome_summary_markdown,
+)
 from row_stats_narrative import glossary_bullets, verified_row_stats_strip_items
 
 load_dotenv()
@@ -660,6 +664,21 @@ if uploaded_file:
                     f"({AGENT_ROW_ID}); previews compare rows **by position**, show "
                     "up to **k** rows with the most column changes (ties: earlier "
                     "row first). Rows may not correspond to the same logical record."
+                )
+            facts = build_cleaning_outcome_facts(
+                st.session_state["preview_df_input"],
+                df_cleaned_stored,
+                row_id_col=AGENT_ROW_ID,
+            )
+            st.markdown("### What actually changed (verified run)")
+            st.markdown(
+                format_outcome_summary_markdown(facts, row_id_label=AGENT_ROW_ID)
+            )
+            stats_for_warn = st.session_state.get("plan_row_stats")
+            if isinstance(stats_for_warn, dict) and stats_for_warn.get("error"):
+                st.caption(
+                    "Row-level subset stats in the plan area may be unavailable; "
+                    "this summary still reflects this upload vs cleaned output."
                 )
             st.subheader("Preview")
             st.caption(
