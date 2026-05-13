@@ -22,6 +22,15 @@ Hard constraints:
       df[col] = df[col].astype(dtype)
       df = df.drop_duplicates()
       df = df.reset_index(drop=True)
+- Never discard the return value of replace or fillna: you must assign it.
+  Using inplace=False without assigning still does nothing to df. Wrong:
+      df.replace(values, np.nan, inplace=False)
+      df[col].fillna(value, inplace=False)
+  Right:
+      df = df.replace(values, np.nan)
+      df[col] = df[col].fillna(value)
+- Keep the working DataFrame in a variable named df from step 1 onward, and
+  return df at the end (do not return an undefined name like data_cleaned).
 
 Pipeline (in order):
 1. df = data_raw.copy().
@@ -31,6 +40,9 @@ Pipeline (in order):
    that look like categorical labels (not free text), also casefold values.
 4. Replace placeholder strings with NaN in object columns:
    "", "N/A", "n/a", "NA", "null", "NULL", "None", "?", "missing", "-", "unknown".
+   Assign the result, e.g. df = df.replace(placeholder_list, np.nan) (or
+   column-wise df[col] = df[col].replace(...)); never call df.replace as a
+   bare statement without assignment.
 5. Coerce dtypes using only the Per-column details block in Dataset Summary
    (not dtype alone). Read each column's detection line when present; if a
    column has no detection line, treat date_like, numeric_string_like, and
@@ -66,13 +78,15 @@ Pipeline (in order):
     1% into a single "other" category. Keep a "_raw" version of any
     categorical variable where you make an "other" category so original
     categories are not lost.
-11. Impute missing values:
+11. Impute missing values (always assign back to df[col]):
     - Numeric columns: compute skew_val = df[col].skew() (a SCALAR float). Use
       the built-in abs(skew_val); NEVER call .abs() on the scalar
       (Series.skew() returns a scalar, not a Series). If abs(skew_val) > 1
-      impute with median, otherwise mean.
-    - Categorical/object columns: use mode if missing fraction <= 20%,
-      otherwise add and use an "unknown" sentinel category.
+      use df[col] = df[col].fillna(df[col].median()), else
+      df[col] = df[col].fillna(df[col].mean()).
+    - Categorical/object columns: if missing fraction <= 20%, use
+      df[col] = df[col].fillna(df[col].mode().iloc[0]) when mode exists; else
+      df[col] = df[col].fillna("unknown").
 12. Drop rows that are entirely NaN: df.dropna(how="all").
 13. Drop exact duplicate rows: df.drop_duplicates().
 14. df = df.reset_index(drop=True).
@@ -89,7 +103,7 @@ def {function_name}(data_raw):
     import pandas as pd
     import numpy as np
     # Your cleaning code here, following the pipeline above in order.
-    return data_cleaned
+    return df
 
 Important: when fit_transform()-style outputs need to be assigned to a
 DataFrame column, flatten with .ravel() first.

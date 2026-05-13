@@ -265,10 +265,21 @@ def make_lightweight_data_cleaning_agent(
         """
         data_cleaner_prompt = """
         You are a Data Cleaning Agent. Fix the broken {function_name}() function.
-        
+
+        When correcting, enforce these rules (pandas Copy-on-Write):
+        - Never use inplace=True on any pandas call.
+        - fillna and replace must assign back: use df[col] = df[col].fillna(...)
+          or df = df.replace(...). A bare line like df[col].fillna(..., inplace=False)
+          without assignment does not update df and triggers ChainedAssignmentError
+          if inplace=True is used on a chained slice.
+        - Step 5: coerce dtypes only for columns whose Dataset Summary shows
+          date_like, numeric_string_like, or boolean_like True; do not loop all
+          object columns with pd.to_numeric.
+        - Keep the working frame in df and end with return df.
+
         Return Python code in ```python``` format with the corrected function definition.
-        
-        Broken code: 
+
+        Broken code:
         {code_snippet}
 
         Error:
