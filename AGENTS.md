@@ -1,7 +1,8 @@
 # AGENTS.md
 
 ## Project Guidelines
-- Always propose a plan in numbered steps before editing code.
+- For **small** edits (localized fix, a handful of lines in one file, obvious typo), a short numbered plan in chat is enough before editing.
+- For **larger** work—roughly **multiple files**, a **new feature**, **refactors**, or **on the order of tens of lines or more** across the change—**switch to Plan mode first**, write the plan there, and **wait for agreement** before implementing. Do **not** apply large or wide-ranging diffs without the user having seen and accepted the plan.
 - Keep changes minimal and avoid overengineering.
 - Remove temporary or large data files, never commit datasets.
 
@@ -11,6 +12,7 @@
 - Jupyter notebooks must remain reproducible: no hard-coded paths, use relative paths.
 
 ## Agent Instructions
+- When in doubt whether a change is "small," treat it as large: plan first, then implement after confirmation.
 - Run `pytest -q` after changes and share results.
 - Confirm before installing new dependencies.
 - Never write secrets, always use environment variables.
