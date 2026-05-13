@@ -12,6 +12,7 @@
 - Jupyter notebooks must remain reproducible: no hard-coded paths, use relative paths.
 
 ## Agent Instructions
+- **Brainstorming / superpowers docs:** Write specs and plans only under `docs/superpowers/` (gitignored). **Never** commit them or mirror them into tracked paths unless the user explicitly requests a tracked copy.
 - When in doubt whether a change is "small," treat it as large: plan first, then implement after confirmation.
 - Run `pytest -q` after changes and share results.
 - Confirm before installing new dependencies.
