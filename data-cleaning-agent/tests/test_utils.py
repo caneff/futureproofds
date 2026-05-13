@@ -151,6 +151,23 @@ class TestExecuteAgentCode:
         assert out["error"] is None
         assert out["result"] == {"a": {0: 1, 1: 2, 2: 3}, "b": {0: 2, 1: 4, 2: 6}}
 
+    def test_enforces_high_missing_employee_id_drop_when_cleaner_keeps_column(self):
+        state = {
+            "data": {
+                "employee_id": ["", "", "", "", "", "", "", "", "", "E1"],
+                "x": list(range(10)),
+            },
+            "code": "def clean(df):\n    return df.copy()\n",
+        }
+
+        out = execute_agent_code(state, "data", "code", "result", "error", "clean")
+
+        assert out["error"] is None
+        res = out["result"]
+        assert res is not None
+        assert "employee_id" not in res
+        assert "x" in res
+
     def test_runtime_failure_captures_error_and_returns_none_result(self):
         state = {
             "data": {"a": [1]},

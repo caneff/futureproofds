@@ -17,12 +17,13 @@ When correcting, enforce these rules (pandas Copy-on-Write):
 - If the error is a ``KeyError`` for a column name, ensure that column was not
   dropped in steps 3 or 7; never reference dropped columns in later steps—derive
   step 9 imputation targets only from ``df.columns`` after drops.
-- Step 8 ID-like rules **do not** exempt sparse ``*_id`` columns from step 3:
-  ``employee_id`` with >40% missing must still be dropped there; ID-like only
-  applies to columns that **survive** 3 and 7 and are truly unique row keys.
-- **Never** invent ``fillna("unknown")`` (or similar default tokens) on label or
-  ID columns unless User Instructions name that exact sentinel; otherwise leave
-  NaN. On ``employee_id``-style codes, drop in step 3 if >40% missing or leave NaN.
+- Step 8 ID-like rules **do not** exempt any column from step 3: if missing share
+  on a column is **> 0.4**, drop it there unless User or Supplemental instructions
+  name it as protected. ID-like classification applies only to columns that
+  **survive** steps 3 and 7 and are truly unique row keys.
+- **Never** invent ``fillna("unknown")`` (or similar default tokens) on label
+  columns unless User Instructions name that exact sentinel; otherwise leave
+  NaN. High-missing columns belong in step 3 drops, not synthetic fills.
 - **Do not** use ``pd.Categorical`` or ``.astype("category")`` for ordinary
   string label columns unless User Instructions explicitly require it.
 - Keep the working frame in df and end with return df.

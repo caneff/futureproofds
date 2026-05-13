@@ -78,32 +78,30 @@ def sparse_missing_share(series: pd.Series) -> float:
     return float(sparse_missing_mask(series).mean())
 
 
-def is_sparse_identifier_column_name(name: str) -> bool:
-    """Heuristic for columns the prompt treats as sparse identifiers (e.g. ``*_id``)."""
-    key = str(name).strip().lower()
-    return key == "employee_id" or key.endswith("_id") or key.endswith("uuid")
-
-
-def find_retained_sparse_identifier_columns(
+def find_retained_high_missing_columns(
     df_before: pd.DataFrame,
     df_after: pd.DataFrame,
     *,
     threshold: float = 0.4,
     protected: frozenset[str] | None = None,
 ) -> list[str]:
-    """Columns that look like sparse IDs, exceed ``threshold`` missing pre-clean, but remain.
+    """Input columns still in ``df_after`` that violate step 3 (high missing share).
 
-    Intended for tests and optional QA over LLM output: the default pipeline says
-    to drop such columns in step 3 before treating names as row keys.
+    Matches pipeline step 3 in ``data_cleaning.md``: any column whose
+    :func:`sparse_missing_share` on the **input** series is strictly greater than
+    ``threshold`` must be dropped before later steps, except labels in
+    ``protected`` (User / Supplemental instructions when the host wires them).
+
+    Used by :func:`apply_high_missing_column_enforcement` and unit tests.
 
     Parameters
     ----------
     df_before, df_after
         Input and output frames from a cleaning run (same logical dataset).
     threshold
-        Missing share above which the column should have been dropped (default 0.4).
+        Strictly between 0 and 1; default ``0.4`` matches the prompt.
     protected
-        Column labels to skip (e.g. user-requested retention).
+        Column labels to skip (never listed as violators).
 
     Returns
     -------
@@ -118,14 +116,56 @@ def find_retained_sparse_identifier_columns(
     for name in df_before.columns:
         if name in skip or name not in after_cols:
             continue
-        if not is_sparse_identifier_column_name(str(name)):
-            continue
         col = df_before[name]
         if isinstance(col, pd.DataFrame):
             col = col.iloc[:, 0]
         if sparse_missing_share(col) > threshold:
             out.append(str(name))
     return sorted(out)
+
+
+def apply_high_missing_column_enforcement(
+    df_before: pd.DataFrame,
+    df_after: pd.DataFrame,
+    *,
+    threshold: float = 0.4,
+    protected: frozenset[str] | None = None,
+    row_id_col: str = APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN,
+) -> pd.DataFrame:
+    """Apply step-3 drops the generated cleaner omitted (missing share on input).
+
+    Step 3 is LLM-authored; this removes any column still present in ``df_after``
+    that exceeds ``threshold`` under :func:`sparse_missing_share` on
+    ``df_before``, except the host alignment column ``row_id_col`` and optional
+    ``protected`` names (same contract as the prompt's User / Supplemental lists).
+
+    Parameters
+    ----------
+    df_before
+        Frame passed into the generated cleaner.
+    df_after
+        Frame returned by the cleaner.
+    threshold
+        Same default as the prompt (strictly between 0 and 1).
+    protected
+        Column names never dropped when supplied by the host.
+    row_id_col
+        Synthetic row alignment column; never dropped here.
+    """
+    skip = frozenset({row_id_col}) | (protected or frozenset())
+    drop_names = find_retained_high_missing_columns(
+        df_before,
+        df_after,
+        threshold=threshold,
+        protected=skip,
+    )
+    if not drop_names:
+        return df_after
+    logger.info(
+        "Enforcing step-3 high-missing column drops absent from generated cleaner: %s",
+        drop_names,
+    )
+    return df_after.drop(columns=list(drop_names), errors="ignore")
 
 
 def normalize_cleaning_column_name(name: str) -> str:
@@ -446,7 +486,7 @@ def summarize_cleaning_row_effects(
     try:
         in_ids = set(df_before[row_id_col].tolist())
         out_ids = set(df_after[row_id_col].tolist())
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return result
     dropped_ids = list(in_ids - out_ids)
     dropped_mask = df_before[row_id_col].isin(dropped_ids)
@@ -822,6 +862,7 @@ def execute_agent_code(
     try:
         result = agent_function(df)
         if isinstance(result, pd.DataFrame):
+            result = apply_high_missing_column_enforcement(df, result)
             result = result.to_dict()
     except KeyError as e:
         logger.error("Execution failed: %s", e)

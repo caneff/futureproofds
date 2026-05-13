@@ -12,7 +12,7 @@ Hard constraints:
 - Start with: df = source_df.copy(). Never mutate source_df.
 - Be deterministic. Do not use randomness. If you must, seed it with 0.
 - Never drop or destructively transform any column named in User Instructions
-  or in Supplemental instructions. Treat those as protected (target/id columns).
+  or in Supplemental instructions. Treat those as protected.
 - Preserve original column order except for columns that are dropped.
 - Reset the index at the end after any row drops.
 - Never use inplace=True anywhere. Do not pass `inplace=True` to any pandas
@@ -52,17 +52,16 @@ Pipeline (in order):
 1. df = source_df.copy().
 2. Normalize column names: lowercase, strip, replace non-alphanumeric runs with
    a single underscore.
-3. **Drop sparse columns first** (before strip, placeholders, dtype coercion,
-   or imputation): for each column, compute **missing share** as the
+3. **Drop high-missing columns first** (before strip, placeholders, dtype coercion,
+   or imputation): for **each** column, compute **missing share** as the
    fraction of rows where the value is ``pd.NA``/NaN **or** (for object/string
    dtypes) the stripped string is empty **or** equals a common placeholder token
    (treat the same token list as step 5: ``""``, ``"N/A"``, ``"n/a"``, etc.). If
    missing share **> 0.4**, **drop** that column, EXCEPT columns listed in User
-   Instructions or Supplemental instructions. **Step 8 ID-like rules never
-   override this step**—a name ending in ``_id`` is **not** an exemption. **Sparse
-   record identifiers** (e.g. ``employee_id``): drop here; **do not** keep them for
-   later synthetic string fills.    Removing sparse columns **immediately after step
-   2** avoids wasted work and wrong imputation paths on doomed columns.
+   Instructions or Supplemental instructions. **No column gets a free pass from
+   its name** (including ``*_id`` or ``employee_id``): the rule is missing share
+   only. **Step 8** never overrides this step. Dropping here **immediately after step
+   2** avoids wasted work and wrong imputation paths on columns that are mostly empty.
 4. For object/string columns, **strip leading/trailing whitespace only** on
    cell values. **Do not** apply ``.str.lower()``, ``.str.casefold()``,
    ``.str.title()``, or other automatic casing changes to label-like columns
@@ -110,13 +109,12 @@ Pipeline (in order):
    9 especially, build candidate column lists only from columns **still on
    `df` at that point** (e.g. iterate `for col in df.columns` with guards, or
    `cols = [c for c in df.columns if ...]` recomputed after each drop). A common
-   failure is dropping a sparse identifier (e.g. `employee_id` with >40% missing)
-   in step 3 then still referencing that name in step 9—**forbidden**; that
-   causes `KeyError` at runtime.
+   failure is dropping a high-missing column in step 3 then still referencing that
+   name in step 9—**forbidden**; that causes `KeyError` at runtime.
 8. Identify **true row-key / ID-like** columns among those **still present after
-   steps 3 and 7**—this classification **never** overrides step 3 or 7. A sparse
-   ``employee_id`` with more than 40% missing **must** still be dropped in step 3;
-   do **not** keep it because the name ends with ``id``. Treat a column as
+   steps 3 and 7**—this classification **never** overrides step 3 or 7. A column
+   with more than 40% missing **must** still be dropped in step 3 regardless of
+   its name; do **not** keep it because the name ends with ``id``. Treat a column as
    ID-like **only if** it survived 3 and 7 **and** one of these holds: (a) non-null
    values are **unique per row** (``nunique(dropna=True) == len(df)``) **and**
    missing fraction is low enough that step 3 did not target it; (b) the column
@@ -142,9 +140,9 @@ Pipeline (in order):
      duplicate a base column for auditing in this pipeline, unless User or Supplemental
      Instructions **explicitly** require a named feature outside this default—default
      behavior treats enums and labels as plain strings only.
-   - **Never** use synthetic string fills on **identifier columns** such as
-     ``employee_id`` / ``*_id`` with opaque codes—drop in step 3 if >40% missing
-     or leave NaN.
+   - **Never** use synthetic string fills on columns that are mostly missing:
+     drop them in step 3 when missing share **> 0.4**, or leave remaining NaN
+     as-is (no invented tokens).
    - User or Supplemental Instructions may still require a **named** sentinel they
      spell out for a specific column—then implement that exact string only.
    - Every column your code **actually fills** in this step (mode/mean/median)
