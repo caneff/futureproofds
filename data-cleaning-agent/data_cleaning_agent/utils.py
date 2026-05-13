@@ -32,6 +32,101 @@ _BOOL_LIKE_TOKENS = frozenset({
     "1",
 })
 
+# Full-cell tokens treated as missing for pipeline step 3 / 5 (``data_cleaning.md``).
+# Compared after strip + casefold; empty strip counts as missing separately.
+_CLEANING_PLACEHOLDER_TOKENS = frozenset({
+    "",
+    "n/a",
+    "na",
+    "null",
+    "none",
+    "?",
+    "missing",
+    "-",
+    "unknown",
+})
+
+
+def sparse_missing_mask(series: pd.Series) -> pd.Series:
+    """Boolean mask aligned with cleaning prompt step 3 (missing + blanks + tokens).
+
+    For numeric, boolean, and datetime columns, only ``pd.NA``/NaN/NaT count as
+    missing. For other dtypes (object, string, categorical), whitespace-only
+    cells and common placeholder strings (after strip + casefold) also count.
+    """
+    if len(series) == 0:
+        return pd.Series(False, index=series.index, dtype="boolean")
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return series.isna()
+    if pd.api.types.is_bool_dtype(series) or pd.api.types.is_numeric_dtype(series):
+        return series.isna()
+    s = series.astype("string")
+    stripped = s.str.strip()
+    lowered = stripped.str.casefold()
+    return (
+        s.isna()
+        | stripped.isna()
+        | (stripped == "")
+        | lowered.isin(_CLEANING_PLACEHOLDER_TOKENS)
+    )
+
+
+def sparse_missing_share(series: pd.Series) -> float:
+    """Fraction of rows counted as missing under :func:`sparse_missing_mask`."""
+    if len(series) == 0:
+        return 0.0
+    return float(sparse_missing_mask(series).mean())
+
+
+def is_sparse_identifier_column_name(name: str) -> bool:
+    """Heuristic for columns the prompt treats as sparse identifiers (e.g. ``*_id``)."""
+    key = str(name).strip().lower()
+    return key == "employee_id" or key.endswith("_id") or key.endswith("uuid")
+
+
+def find_retained_sparse_identifier_columns(
+    df_before: pd.DataFrame,
+    df_after: pd.DataFrame,
+    *,
+    threshold: float = 0.4,
+    protected: frozenset[str] | None = None,
+) -> list[str]:
+    """Columns that look like sparse IDs, exceed ``threshold`` missing pre-clean, but remain.
+
+    Intended for tests and optional QA over LLM output: the default pipeline says
+    to drop such columns in step 3 before treating names as row keys.
+
+    Parameters
+    ----------
+    df_before, df_after
+        Input and output frames from a cleaning run (same logical dataset).
+    threshold
+        Missing share above which the column should have been dropped (default 0.4).
+    protected
+        Column labels to skip (e.g. user-requested retention).
+
+    Returns
+    -------
+    list[str]
+        Sorted column names still present in ``df_after`` that violate the rule.
+    """
+    if not 0.0 < threshold < 1.0:
+        raise ValueError("threshold must be strictly between 0 and 1")
+    skip = protected or frozenset()
+    out: list[str] = []
+    after_cols = set(df_after.columns)
+    for name in df_before.columns:
+        if name in skip or name not in after_cols:
+            continue
+        if not is_sparse_identifier_column_name(str(name)):
+            continue
+        col = df_before[name]
+        if isinstance(col, pd.DataFrame):
+            col = col.iloc[:, 0]
+        if sparse_missing_share(col) > threshold:
+            out.append(str(name))
+    return sorted(out)
+
 
 def normalize_cleaning_column_name(name: str) -> str:
     """
@@ -378,7 +473,15 @@ class NumericStats:
 
 @dataclass(frozen=True)
 class ColumnSummary:
-    """Per-column summary used by the cleaning agent prompt."""
+    """Per-column summary used by the cleaning agent prompt.
+
+    Attributes
+    ----------
+    missing_pct
+        Percent of rows missing under the same rules as pipeline step 3 in
+        ``data_cleaning.md`` (NaN/NA plus, for string-like columns, blanks and
+        common placeholder tokens after strip).
+    """
 
     name: str
     dtype: str
@@ -557,7 +660,7 @@ def _summarize_column(name: str, series: pd.Series, n_rows: int) -> ColumnSummar
     return ColumnSummary(
         name=name,
         dtype=str(series.dtype),
-        missing_pct=round(float(series.isna().mean()) * 100, 2) if n_rows else 0.0,
+        missing_pct=round(sparse_missing_share(series) * 100, 2) if n_rows else 0.0,
         cardinality=cardinality,
         sample_values=_sample_values(series),
         numeric_stats=_numeric_stats(series) if is_numeric else None,
