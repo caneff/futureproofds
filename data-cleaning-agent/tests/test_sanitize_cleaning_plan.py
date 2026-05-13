@@ -33,19 +33,20 @@ def test_sanitize_drops_hallucinated_column():
 
 
 @pytest.mark.unit
-def test_sanitize_keeps_normalized_and_raw_suffix():
+def test_sanitize_drops_hallucinated_plan_column_not_in_dataset():
+    """Plan rows for names not present on the frame are dropped."""
     df = pd.DataFrame({"City Name": [1, 2]})
     plan = {
         "columns": [
             {"name": "city_name", "actions": ["normalize"]},
-            {"name": "city_name_raw", "actions": ["add _raw"]},
+            {"name": "city_name_shadow", "actions": ["derive duplicate"]},
         ],
         "row_ops": [],
         "notes": "",
     }
     out = sanitize_cleaning_plan(plan, df)
     names = {c["name"] for c in out["columns"]}
-    assert names == {"city_name", "city_name_raw"}
+    assert names == {"city_name"}
 
 
 @pytest.mark.unit

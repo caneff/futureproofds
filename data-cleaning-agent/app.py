@@ -237,7 +237,7 @@ if uploaded_file:
         st.session_state.pop("plan_regen_exclusion_instructions", None)
         st.session_state["_cleaning_upload_fp"] = upload_fp
 
-    df_raw = pd.read_csv(uploaded_file)
+    df_uploaded = pd.read_csv(uploaded_file)
 
     supplemental_instructions = (
         f'The column "{AGENT_ROW_ID}" is a synthetic stable row identifier '
@@ -250,12 +250,12 @@ if uploaded_file:
         with st.spinner("Generating plan and code..."):
             llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
             agent = LightweightDataCleaningAgent(model=llm, log=True)
-            df_input = df_raw.copy()
+            df_input = df_uploaded.copy()
             df_input.insert(
                 0, AGENT_ROW_ID, pd.RangeIndex(stop=len(df_input), dtype="int64")
             )
             agent.generate_cleaning_code(
-                data_raw=df_input,
+                source_df=df_input,
                 supplemental_instructions=supplemental_instructions,
             )
             st.session_state["pending_cleaner_code"] = agent.get_data_cleaner_function()
@@ -361,7 +361,7 @@ if uploaded_file:
                                 f"cleaner): {stats['n_in']:,} → {stats['n_out']:,} rows "
                                 f"({stats['removed_total']:,} removed in total)."
                             )
-                            rnull = stats.get("removed_all_null_raw_user_cols")
+                            rnull = stats.get("removed_all_null_input_user_cols")
                             if rnull is not None:
                                 st.caption(
                                     f"Of removed rows, {rnull:,} were all-null on original "
@@ -413,7 +413,7 @@ if uploaded_file:
                                     model=llm, log=True
                                 )
                                 agent.generate_cleaning_code(
-                                    data_raw=df_input_stored,
+                                    source_df=df_input_stored,
                                     user_instructions=None,
                                     supplemental_instructions=supplemental_for_regen,
                                 )
@@ -591,21 +591,26 @@ if uploaded_file:
             else:
                 max_k = 1
                 default_k = 1
-            k_preview = int(
-                st.number_input(
-                    "Preview rows (k)",
-                    min_value=1,
-                    max_value=max_k,
-                    value=default_k,
-                    step=1,
-                    width=220,
-                    help=(
-                        "Up to this many differing rows, preferring those with the "
-                        "**most** changed columns (ties: earlier id in cleaned order, "
-                        "or earlier row index when not aligned)."
-                    ),
-                )
-                or default_k
+            _preview_k_state = "cleaning_preview_k"
+            if _preview_k_state in st.session_state:
+                try:
+                    cur = int(st.session_state[_preview_k_state])
+                except (TypeError, ValueError):
+                    cur = default_k
+                st.session_state[_preview_k_state] = min(max(cur, 1), max_k)
+            k_preview = st.slider(
+                "Preview rows (k)",
+                min_value=1,
+                max_value=max_k,
+                value=default_k,
+                step=1,
+                help=(
+                    "Up to this many preview rows: every differing row is "
+                    "listed first (most changed columns first); if fewer than "
+                    "k rows differ, matching rows are added to reach k when "
+                    "possible."
+                ),
+                key=_preview_k_state,
             )
             to_export = reorder_cleaned_for_export(
                 st.session_state["preview_df_input"],
@@ -647,7 +652,8 @@ if uploaded_file:
                 )
             st.subheader("Preview")
             st.caption(
-                "Sorted by most changed columns, up to k above. "
+                "Mismatching rows first (most changed columns), then matching "
+                "rows to fill up to k when fewer than k rows differ. "
                 "Shading marks differing cells; numbers rounded to 2 decimals."
             )
             before_disp, after_disp = style_preview_pair(

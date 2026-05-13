@@ -94,7 +94,7 @@ agent = LightweightDataCleaningAgent(model=llm)
 df = pd.read_csv("your_data.csv")
 
 # Run the cleaning agent
-agent.invoke_agent(data_raw=df)
+agent.invoke_agent(source_df=df)
 
 # Get the cleaned dataset
 cleaned_df = agent.get_data_cleaned()
@@ -108,13 +108,13 @@ cleaned_df.to_csv("cleaned_data.csv", index=False)
 ```python
 # End-user cleaning instructions (columns named here are protected)
 agent.invoke_agent(
-    data_raw=df,
+    source_df=df,
     user_instructions="Remove columns with more than 30% missing values and standardize date formats",
 )
 
 # Application-injected hints (separate prompt section; same protection rules)
 agent.invoke_agent(
-    data_raw=df,
+    source_df=df,
     supplemental_instructions="Preserve column __agent_row_id__ unchanged.",
 )
 ```

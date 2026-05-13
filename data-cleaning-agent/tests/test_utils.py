@@ -173,7 +173,21 @@ class TestExecuteAgentCode:
 
         assert out["result"] is None
         assert "missing_col" in (out["error"] or "")
-        assert "steps 6–7" in (out["error"] or "")
+        assert "steps 3 or 7" in (out["error"] or "")
+
+    def test_length_mismatch_error_includes_alignment_hint(self):
+        state = {
+            "data": {"a": list(range(96))},
+            "code": ("def clean(df):\n    df['b'] = [1, 2, 3, 4]\n    return df\n"),
+        }
+
+        out = execute_agent_code(state, "data", "code", "result", "error", "clean")
+
+        assert out["result"] is None
+        err = out["error"] or ""
+        assert "Length of values" in err
+        assert "Hint:" in err
+        assert "index=df.index" in err
 
     def test_raises_when_named_function_not_in_generated_code(self):
         state = {

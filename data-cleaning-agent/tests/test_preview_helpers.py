@@ -113,12 +113,25 @@ def test_unaligned_when_row_id_missing_from_cleaned():
 
 
 @pytest.mark.unit
-def test_unaligned_when_row_id_missing_from_raw():
+def test_unaligned_when_row_id_missing_from_input_frame():
     rid = AGENT_ROW_ID
     raw = pd.DataFrame({"a": [1, 2]})
     cleaned = pd.DataFrame({rid: [0], "a": [1]})
     result = preview_aligned_frames(raw, cleaned, rid, k=5)
     assert result.aligned is False
+
+
+@pytest.mark.unit
+def test_preview_pads_to_k_with_matching_rows_when_mismatches_sparse():
+    """When fewer than k rows differ, pad with matching intersection rows."""
+    rid = AGENT_ROW_ID
+    raw = pd.DataFrame({rid: list(range(10)), "v": list(range(10))})
+    cleaned = raw.copy()
+    cleaned.loc[0, "v"] = 999
+    result = preview_aligned_frames(raw, cleaned, rid, k=5)
+    assert result.aligned is True
+    assert len(result.before_view) == 5
+    assert len(result.after_view) == 5
 
 
 @pytest.mark.unit
@@ -171,7 +184,7 @@ def test_preview_excludes_row_id_when_aligned():
 
 
 @pytest.mark.unit
-def test_preview_column_order_follows_raw_csv_order():
+def test_preview_column_order_follows_upload_csv_order():
     """Common columns appear in raw column order, not sorted alphabetically."""
     rid = AGENT_ROW_ID
     raw = pd.DataFrame({
@@ -219,7 +232,24 @@ def test_aligned_surfaces_rows_only_in_before():
 
 
 @pytest.mark.unit
-def test_reorder_cleaned_for_export_raw_order_then_new_columns():
+def test_preview_city_shows_strings_when_cleaned_uses_category_dtype():
+    """Regression: dtype/null representation differences must not hide city values in preview."""
+    rid = AGENT_ROW_ID
+    raw = pd.read_csv("data/sample_data.csv").reset_index(drop=True)
+    raw[rid] = raw.index.astype("int64")
+    cleaned = raw.copy()
+    cleaned["city"] = cleaned["city"].astype("category")
+    cleaned.loc[0, "department"] = "SalesX"
+    result = preview_aligned_frames(raw, cleaned, rid, k=5)
+    assert result.aligned is True
+    assert not result.after_view.empty
+    city_after = result.after_view["city"].tolist()
+    assert any(pd.notna(v) and str(v) != "nan" for v in city_after)
+    assert "New York" in city_after or "Boston" in city_after
+
+
+@pytest.mark.unit
+def test_reorder_cleaned_for_export_upload_order_then_new_columns():
     rid = AGENT_ROW_ID
     raw = pd.DataFrame({
         "m": [1, 2],

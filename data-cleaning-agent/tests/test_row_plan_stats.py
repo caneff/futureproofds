@@ -25,7 +25,7 @@ def test_summarize_row_effects_counts_removed_and_all_null_subset():
     assert out["n_in"] == 4
     assert out["n_out"] == 2
     assert out["removed_total"] == 2
-    assert out["removed_all_null_raw_user_cols"] == 2
+    assert out["removed_all_null_input_user_cols"] == 2
 
 
 @pytest.mark.unit
@@ -34,4 +34,4 @@ def test_summarize_row_effects_without_row_id_column():
     df_out = pd.DataFrame({"x": [1]})
     out = summarize_cleaning_row_effects(df_in, df_out, row_id_col="__missing__")
     assert out["removed_total"] == 1
-    assert out["removed_all_null_raw_user_cols"] is None
+    assert out["removed_all_null_input_user_cols"] is None

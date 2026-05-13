@@ -51,7 +51,7 @@ def _run_data_cleaning_generation(
     *,
     user_instructions: str | None,
     supplemental_instructions: str | None,
-    data_raw_df: pd.DataFrame,
+    source_df: pd.DataFrame,
     function_name: str,
     log: bool,
     log_dir: str,
@@ -68,7 +68,7 @@ def _run_data_cleaning_generation(
         End-user cleaning instructions.
     supplemental_instructions : str or None
         Host-provided instructions.
-    data_raw_df : pd.DataFrame
+    source_df : pd.DataFrame
         Data used only for summary statistics in the prompt.
     function_name : str
         Generated function name.
@@ -85,7 +85,7 @@ def _run_data_cleaning_generation(
         Keys: ``data_cleaner_function``, ``cleaning_plan``, ``data_cleaner_function_path``,
         ``data_cleaner_function_name``.
     """
-    summary = get_dataframe_summary(data_raw_df)
+    summary = get_dataframe_summary(source_df)
     dataset_summary = format_dataframe_summary(summary)
     chain = _data_cleaning_generation_chain(model)
     llm_out = chain.invoke({
@@ -97,7 +97,7 @@ def _run_data_cleaning_generation(
     code = llm_out["code"]
     plan = llm_out["cleaning_plan"]
     if plan is not None:
-        plan = sanitize_cleaning_plan(plan, data_raw_df)
+        plan = sanitize_cleaning_plan(plan, source_df)
     file_path = None
     if log:
         file_path = os.path.join(log_dir, file_name)
@@ -118,7 +118,7 @@ def _run_data_cleaning_generation(
 class GraphState(TypedDict, total=False):
     user_instructions: Required[str | None]
     supplemental_instructions: str | None
-    data_raw: Required[dict]
+    source_df: Required[dict]
     max_retries: Required[int]
     retry_count: Required[int]
     data_cleaned: dict
@@ -185,7 +185,7 @@ class LightweightDataCleaningAgent:
 
     def invoke_agent(
         self,
-        data_raw: pd.DataFrame,
+        source_df: pd.DataFrame,
         user_instructions: str | None = None,
         supplemental_instructions: str | None = None,
         max_retries: int = 3,
@@ -197,7 +197,7 @@ class LightweightDataCleaningAgent:
 
         Parameters
         ----------
-        data_raw : pd.DataFrame
+        source_df : pd.DataFrame
             Raw dataset to clean.
         user_instructions : str, optional
             Free-form cleaning instructions from the end user. Columns named
@@ -225,7 +225,7 @@ class LightweightDataCleaningAgent:
         initial_state: GraphState = {
             "user_instructions": user_instructions,
             "supplemental_instructions": supplemental_instructions,
-            "data_raw": data_raw.to_dict(),
+            "source_df": source_df.to_dict(),
             "max_retries": max_retries,
             "retry_count": retry_count,
         }
@@ -238,12 +238,12 @@ class LightweightDataCleaningAgent:
         if self.response:
             return pd.DataFrame(self.response.get("data_cleaned"))
 
-    def get_data_raw(self):
+    def get_input_dataframe(self):
         """
-        Retrieves the raw data.
+        Retrieves the input (pre-cleaning) dataframe from the last response.
         """
         if self.response:
-            return pd.DataFrame(self.response.get("data_raw"))
+            return pd.DataFrame(self.response.get("source_df"))
 
     def get_data_cleaner_function(self):
         """
@@ -264,7 +264,7 @@ class LightweightDataCleaningAgent:
 
     def generate_cleaning_code(
         self,
-        data_raw: pd.DataFrame,
+        source_df: pd.DataFrame,
         user_instructions: str | None = None,
         supplemental_instructions: str | None = None,
     ) -> None:
@@ -281,7 +281,7 @@ class LightweightDataCleaningAgent:
             self.model,
             user_instructions=user_instructions,
             supplemental_instructions=supplemental_instructions,
-            data_raw_df=data_raw,
+            source_df=source_df,
             function_name=self.function_name,
             log=self.log,
             log_dir=log_dir,
@@ -292,7 +292,7 @@ class LightweightDataCleaningAgent:
             "retry_count": 0,
         }
 
-    def execute_stored_cleaning(self, data_raw: pd.DataFrame) -> dict:
+    def execute_stored_cleaning(self, source_df: pd.DataFrame) -> dict:
         """
         Execute the code from the last ``generate_cleaning_code`` (or graph output).
 
@@ -307,13 +307,13 @@ class LightweightDataCleaningAgent:
             raise ValueError(msg)
         fn = self.response.get("data_cleaner_function_name") or self.function_name
         state = {
-            "data_raw": data_raw.to_dict(),
+            "source_df": source_df.to_dict(),
             "data_cleaner_function": self.response["data_cleaner_function"],
             "data_cleaner_function_name": fn,
         }
         exec_out = execute_agent_code(
             state=state,
-            data_key="data_raw",
+            data_key="source_df",
             result_key="data_cleaned",
             error_key="data_cleaner_error",
             code_snippet_key="data_cleaner_function",
@@ -322,7 +322,7 @@ class LightweightDataCleaningAgent:
         self.response = {
             **self.response,
             **exec_out,
-            "data_raw": state["data_raw"],
+            "source_df": state["source_df"],
             "data_cleaner_function_name": fn,
         }
         return exec_out
@@ -356,7 +356,7 @@ class LightweightDataCleaningAgent:
             output_parser=DataCleaningOutputParser(),
         )
         plan = fixed.get("cleaning_plan")
-        raw = self.response.get("data_raw")
+        raw = self.response.get("source_df")
         if plan is not None and raw is not None:
             plan = sanitize_cleaning_plan(plan, pd.DataFrame.from_dict(raw))
         self.response = {
@@ -417,14 +417,14 @@ def make_lightweight_data_cleaning_agent(
         """
         logger.info("Creating data cleaner code")
 
-        data_raw = state["data_raw"]
-        df = pd.DataFrame.from_dict(data_raw)
+        source_df = state["source_df"]
+        df = pd.DataFrame.from_dict(source_df)
 
         return _run_data_cleaning_generation(
             model,
             user_instructions=state.get("user_instructions"),
             supplemental_instructions=state.get("supplemental_instructions"),
-            data_raw_df=df,
+            source_df=df,
             function_name=function_name,
             log=log,
             log_dir=log_dir,
@@ -437,7 +437,7 @@ def make_lightweight_data_cleaning_agent(
         """
         return execute_agent_code(
             state=state,
-            data_key="data_raw",
+            data_key="source_df",
             result_key="data_cleaned",
             error_key="data_cleaner_error",
             code_snippet_key="data_cleaner_function",
@@ -457,7 +457,7 @@ def make_lightweight_data_cleaning_agent(
             function_name=state.get("data_cleaner_function_name"),
             output_parser=DataCleaningOutputParser(),
         )
-        raw = state.get("data_raw")
+        raw = state.get("source_df")
         if out.get("cleaning_plan") is not None and raw is not None:
             out = {
                 **out,

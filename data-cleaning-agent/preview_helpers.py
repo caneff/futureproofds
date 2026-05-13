@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, cast
 
+import numpy as np
 import pandas as pd
 from datacompy.core import Compare
 
@@ -54,14 +55,14 @@ def _all_distinct_in_order(series: pd.Series) -> list:
     return out
 
 
-def _preview_columns_in_raw_order(
-    raw: pd.DataFrame,
+def _preview_columns_in_upload_order(
+    upload: pd.DataFrame,
     cleaned: pd.DataFrame,
     row_id: str,
 ) -> list[str]:
-    """Names common to ``raw`` and ``cleaned`` (excluding ``row_id``), in ``raw`` order."""
-    common = (set(raw.columns) & set(cleaned.columns)) - {row_id}
-    return [c for c in raw.columns if c in common]
+    """Names common to upload and cleaned (excluding ``row_id``), in upload column order."""
+    common = (set(upload.columns) & set(cleaned.columns)) - {row_id}
+    return [c for c in upload.columns if c in common]
 
 
 def _ordered_drop_row_id(
@@ -86,6 +87,27 @@ def _empty_frame(columns: list[str]) -> pd.DataFrame:
 def _empty_pair(cols: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
     e = _empty_frame(cols)
     return e, e
+
+
+def _normalize_object_nulls_for_compare(df: pd.DataFrame) -> pd.DataFrame:
+    """Return a copy safe to pass to DataComPy ``Compare``.
+
+    ``groupby(...).first()`` often stores missing values in ``object`` columns as
+    Python ``None``, while ``Categorical`` / numeric columns use ``float(nan)``.
+    DataComPy then treats ``None`` and ``nan`` as different and can surface
+    ``*_df2`` cells as missing in mismatch rows even when the cleaned data is
+    correct—Streamlit previews look wrong while CSV export matches.
+
+    Coerce missing-like values in object columns to ``numpy.nan`` so comparison
+    matches the on-disk CSV semantics.
+    """
+    out = df.copy()
+    for c in out.columns:
+        s = out[c]
+        if s.dtype != object:
+            continue
+        out[c] = s.where(s.notna(), np.nan)
+    return out
 
 
 _PREVIEW_DIFF_BG = "background-color: rgba(255, 230, 120, 0.45)"
@@ -193,7 +215,14 @@ def _mismatch_views_from_compare(
     row_id: str | None,
     order_map: dict | None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Split ``compare.intersect_rows`` into before/after views for ``value_cols``."""
+    """Split ``compare.intersect_rows`` into before/after views for ``value_cols``.
+
+    Takes up to ``k`` mismatching rows (most differing columns first), then—if
+    fewer than ``k`` mismatching rows exist but at least one mismatch does—pads
+    with fully matching intersection rows in stable ``row_id`` / index order
+    so the preview table reaches up to ``k`` rows when possible. When there are
+    no mismatches, returns empty frames (callers may show an all-clear message).
+    """
     if k <= 0 or not value_cols:
         return _empty_pair(value_cols)
 
@@ -201,6 +230,11 @@ def _mismatch_views_from_compare(
     match_cols = [f"{c}_match" for c in value_cols if f"{c}_match" in ir.columns]
     if not match_cols:
         return _empty_pair(value_cols)
+
+    rename_before = {f"{c}_df1": c for c in value_cols}
+    rename_after = {f"{c}_df2": c for c in value_cols}
+    df1_cols = [f"{c}_df1" for c in value_cols]
+    df2_cols = [f"{c}_df2" for c in value_cols]
 
     mism = ~ir[match_cols].all(axis=1)
     sub = ir.loc[mism].copy()
@@ -226,13 +260,39 @@ def _mismatch_views_from_compare(
             kind="mergesort",
         )
 
-    rename_before = {f"{c}_df1": c for c in value_cols}
-    rename_after = {f"{c}_df2": c for c in value_cols}
-    df1_cols = [f"{c}_df1" for c in value_cols]
-    df2_cols = [f"{c}_df2" for c in value_cols]
-    before = sub.loc[:, df1_cols].rename(columns=rename_before).head(k)
-    after = sub.loc[:, df2_cols].rename(columns=rename_after).head(k)
-    return before.reset_index(drop=True).copy(), after.reset_index(drop=True).copy()
+    sub_use = sub.head(k)
+    before_m = sub_use.loc[:, df1_cols].rename(columns=rename_before)
+    after_m = sub_use.loc[:, df2_cols].rename(columns=rename_after)
+    n_m = len(before_m)
+    if n_m >= k:
+        return (
+            before_m.reset_index(drop=True).copy(),
+            after_m.reset_index(drop=True).copy(),
+        )
+
+    need = k - n_m
+    taken_idx = set(sub_use.index)
+    good = ir.loc[ir[match_cols].all(axis=1) & ~ir.index.isin(taken_idx)].copy()
+
+    if order_map is not None and row_id is not None and row_id in good.columns:
+        good["_ord_pad"] = good[row_id].map(order_map)
+        good["_ord_pad"] = good["_ord_pad"].fillna(len(order_map))
+        good = good.sort_values(by=["_ord_pad"], ascending=True, kind="mergesort")
+    else:
+        good = good.sort_index(kind="mergesort")
+
+    good_use = good.head(need)
+    if good_use.empty:
+        return (
+            before_m.reset_index(drop=True).copy(),
+            after_m.reset_index(drop=True).copy(),
+        )
+
+    before_p = good_use.loc[:, df1_cols].rename(columns=rename_before)
+    after_p = good_use.loc[:, df2_cols].rename(columns=rename_after)
+    before = pd.concat([before_m, before_p], ignore_index=True)
+    after = pd.concat([after_m, after_p], ignore_index=True)
+    return before.copy(), after.copy()
 
 
 def reorder_cleaned_for_export(
@@ -287,8 +347,11 @@ def preview_aligned_frames(
     row_id
         Name of the stable row identifier column.
     k
-        Maximum number of differing intersection rows in the preview, chosen
-        by **most** column-level mismatches (then tie-break as above).
+        Maximum rows in the before/after preview. At least one column must
+        differ on a row for it to count as a **mismatch** row; those are listed
+        first (most differing columns first). If fewer than ``k`` mismatching
+        rows exist, **matching** intersection rows are appended in stable id
+        order until the preview reaches ``k`` rows (or intersection is exhausted).
 
     Returns
     -------
@@ -303,7 +366,7 @@ def preview_aligned_frames(
     }
 
     def _fallback() -> AlignedPreview:
-        common = _preview_columns_in_raw_order(raw, cleaned, row_id)
+        common = _preview_columns_in_upload_order(raw, cleaned, row_id)
         empty = AlignedPreview(
             before_view=_empty_frame(common),
             after_view=_empty_frame(common),
@@ -317,8 +380,8 @@ def preview_aligned_frames(
         if n == 0:
             return empty
         compare = Compare(
-            b0.iloc[:n][common].copy(),
-            a0.iloc[:n][common].copy(),
+            _normalize_object_nulls_for_compare(b0.iloc[:n][common].copy()),
+            _normalize_object_nulls_for_compare(a0.iloc[:n][common].copy()),
             on_index=True,
             **cmp_kw,
         )
@@ -336,7 +399,7 @@ def preview_aligned_frames(
     if row_id not in raw.columns or row_id not in cleaned.columns:
         return _fallback()
 
-    display_cols = _preview_columns_in_raw_order(raw, cleaned, row_id)
+    display_cols = _preview_columns_in_upload_order(raw, cleaned, row_id)
 
     cols_for_compare = [row_id] + display_cols if display_cols else [row_id]
     d1 = (
@@ -351,6 +414,9 @@ def preview_aligned_frames(
         .groupby(row_id, as_index=False, sort=False)
         .first()
     )
+
+    d1 = _normalize_object_nulls_for_compare(d1)
+    d2 = _normalize_object_nulls_for_compare(d2)
 
     compare = Compare(d1, d2, join_columns=row_id, **cmp_kw)
 

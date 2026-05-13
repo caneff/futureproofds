@@ -10,8 +10,8 @@ def test_parser_extracts_code_and_valid_json():
 Here is the solution.
 
 ```python
-def data_cleaner(data_raw):
-    return data_raw.copy()
+def data_cleaner(source_df):
+    return source_df.copy()
 ```
 
 ```json

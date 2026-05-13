@@ -24,7 +24,7 @@ def test_prompt_renders_with_only_expected_variables():
         all_datasets_summary="<s>",
         function_name="data_cleaner",
     )
-    assert "data_cleaner(data_raw)" in rendered
+    assert "data_cleaner(source_df)" in rendered
     assert "```json" in rendered
     assert "row_ops" in rendered
     assert "drop column (>40% missing)" in rendered

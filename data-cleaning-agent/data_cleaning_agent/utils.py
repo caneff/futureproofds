@@ -174,8 +174,8 @@ def sanitize_cleaning_plan(
     plan: dict[str, Any] | None, df: pd.DataFrame
 ) -> dict[str, Any] | None:
     """
-    Drop ``columns`` entries whose ``name`` is not an input column label,
-    its step-2 normalized form, or ``<normalized>_raw`` for a real base column.
+    Drop ``columns`` entries whose ``name`` is not an input column label or
+    its step-2 normalized form.
 
     Also drops the app-injected synthetic row-id column from the plan (it is
     present in ``df`` for alignment but should not appear in the user-facing
@@ -188,7 +188,7 @@ def sanitize_cleaning_plan(
     plan : dict or None
         Parsed cleaning plan (``columns``, ``row_ops``, ``notes``).
     df : pd.DataFrame
-        The ``data_raw`` frame the plan was generated for (same columns as summary).
+        The ``source_df`` frame the plan was generated for (same columns as summary).
 
     Returns
     -------
@@ -199,7 +199,6 @@ def sanitize_cleaning_plan(
         return plan
     raw_cols = list(df.columns)
     norms = {normalize_cleaning_column_name(c) for c in raw_cols}
-    allowed_raw_norms = {f"{m}_raw" for m in norms}
 
     synth_norm = normalize_cleaning_column_name(APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN)
 
@@ -212,15 +211,11 @@ def sanitize_cleaning_plan(
         return normalize_cleaning_column_name(n) == synth_norm
 
     def _row_allowed(name: str) -> bool:
-        """Allow only names that match an input column or ``<norm>_raw`` for that column."""
+        """Allow only names that match an input column (after step-2 normalization)."""
         norm_label = normalize_cleaning_column_name(name)
         if not norm_label:
             return False
-        if norm_label in norms:
-            return True
-        if norm_label in allowed_raw_norms:
-            return True
-        return False
+        return norm_label in norms
 
     kept: list[dict[str, Any]] = []
     dropped: list[str] = []
@@ -290,13 +285,13 @@ def run_cleaner_code_on_dataframe(
         ``(cleaned_df, None)`` on success, or ``(None, error_message)`` on failure.
     """
     state = {
-        "data_raw": df.to_dict(),
+        "source_df": df.to_dict(),
         "data_cleaner_function": code,
         "data_cleaner_function_name": function_name,
     }
     out = execute_agent_code(
         state=state,
-        data_key="data_raw",
+        data_key="source_df",
         result_key="data_cleaned",
         error_key="data_cleaner_error",
         code_snippet_key="data_cleaner_function",
@@ -336,7 +331,7 @@ def summarize_cleaning_row_effects(
     -------
     dict
         Keys: ``n_in``, ``n_out``, ``removed_total``, and optionally
-        ``removed_all_null_raw_user_cols`` (int or None).
+        ``removed_all_null_input_user_cols`` (int or None).
     """
     n_in = len(df_before)
     n_out = len(df_after)
@@ -345,13 +340,13 @@ def summarize_cleaning_row_effects(
         "n_in": n_in,
         "n_out": n_out,
         "removed_total": removed_total,
-        "removed_all_null_raw_user_cols": None,
+        "removed_all_null_input_user_cols": None,
     }
     if row_id_col not in df_before.columns or row_id_col not in df_after.columns:
         return result
     user_cols = [c for c in df_before.columns if c != row_id_col]
     if not user_cols:
-        result["removed_all_null_raw_user_cols"] = 0
+        result["removed_all_null_input_user_cols"] = 0
         return result
     try:
         in_ids = set(df_before[row_id_col].tolist())
@@ -360,10 +355,10 @@ def summarize_cleaning_row_effects(
         return result
     dropped_mask = df_before[row_id_col].isin(in_ids - out_ids)
     if not dropped_mask.any():
-        result["removed_all_null_raw_user_cols"] = 0
+        result["removed_all_null_input_user_cols"] = 0
         return result
-    all_null_raw = df_before.loc[dropped_mask, user_cols].isna().all(axis=1)
-    result["removed_all_null_raw_user_cols"] = int(all_null_raw.sum())
+    all_null_input = df_before.loc[dropped_mask, user_cols].isna().all(axis=1)
+    result["removed_all_null_input_user_cols"] = int(all_null_input.sum())
     return result
 
 
@@ -728,13 +723,22 @@ def execute_agent_code(
         logger.error("Execution failed: %s", e)
         agent_error = (
             "An error occurred during data cleaning: missing column or label "
-            f"{str(e)!r}. If this name was removed in pipeline steps 6–7 (high "
+            f"{str(e)!r}. If this name was removed in pipeline steps 3 or 7 (high "
             "missingness, constant, or all-null), the cleaner must not reference "
             "it in later steps—use only columns still on df after those drops."
         )
     except Exception as e:
         logger.error("Execution failed: %s", e)
-        agent_error = f"An error occurred during data cleaning: {str(e)}"
+        msg = str(e)
+        hint = ""
+        if "Length of values" in msg and "length of index" in msg.lower():
+            hint = (
+                " Hint: a column assignment used a short list/array/Series (often "
+                "`.unique()`, `.cat.categories`, or `pd.Series(list)` without "
+                "`index=df.index`). Assign a scalar, `Series(..., index=df.index)`, "
+                "or `df[other_col].copy()` so the RHS has one value per row."
+            )
+        agent_error = f"An error occurred during data cleaning: {msg}{hint}"
 
     return {result_key: result, error_key: agent_error}
 
