@@ -1,5 +1,6 @@
 # Utility functions for lightweight data cleaning agent
 
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -10,6 +11,10 @@ import pandas as pd
 from langchain_core.output_parsers import BaseOutputParser
 
 logger = logging.getLogger(__name__)
+
+# Synthetic stable row id injected by the Streamlit app (see ``preview_helpers.AGENT_ROW_ID``).
+# Keep identical; omit from user-facing cleaning plans.
+APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN = "__agent_row_id__"
 
 # Casefolded tokens that boolean-like detection accepts as members of a binary
 # categorical (e.g. "Yes"/"No", "true"/"false", "T"/"F", "0"/"1").
@@ -25,6 +30,242 @@ _BOOL_LIKE_TOKENS = frozenset({
     "0",
     "1",
 })
+
+
+def normalize_cleaning_column_name(name: str) -> str:
+    """
+    Match pipeline step 2 in ``prompts/data_cleaning.md``: lowercase, strip,
+    replace non-alphanumeric runs with a single underscore.
+    """
+    s = str(name).strip().lower()
+    s = re.sub(r"[^a-z0-9]+", "_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s
+
+
+def _coerce_plan_columns_to_rows(columns: Any) -> list[dict[str, Any]]:
+    """
+    Normalize ``plan['columns']`` to a list of dict rows for sanitization.
+
+    The LLM sometimes emits a JSON object mapping column name -> actions instead
+    of an array of ``{ "name", "actions" }`` objects; that path must still be filtered.
+    """
+    if isinstance(columns, list):
+        return [r for r in columns if isinstance(r, dict)]
+    if isinstance(columns, dict):
+        rows: list[dict[str, Any]] = []
+        for key, val in columns.items():
+            if key is None:
+                continue
+            k = str(key).strip()
+            if not k:
+                continue
+            if isinstance(val, list):
+                actions = [str(x) for x in val]
+            elif val is None:
+                actions = []
+            else:
+                actions = [str(val)]
+            rows.append({"name": k, "actions": actions})
+        return rows
+    return []
+
+
+def sanitize_cleaning_plan(
+    plan: dict[str, Any] | None, df: pd.DataFrame
+) -> dict[str, Any] | None:
+    """
+    Drop ``columns`` entries whose ``name`` is not an input column label,
+    its step-2 normalized form, or ``<normalized>_raw`` for a real base column.
+
+    Also drops the app-injected synthetic row-id column from the plan (it is
+    present in ``df`` for alignment but should not appear in the user-facing
+    summary).
+
+    Appends a short note when rows are removed so the UI can explain pruning.
+
+    Parameters
+    ----------
+    plan : dict or None
+        Parsed cleaning plan (``columns``, ``row_ops``, ``notes``).
+    df : pd.DataFrame
+        The ``data_raw`` frame the plan was generated for (same columns as summary).
+
+    Returns
+    -------
+    dict or None
+        A shallow-copied plan with filtered ``columns``, or None if ``plan`` is None.
+    """
+    if plan is None or not isinstance(plan, dict):
+        return plan
+    raw_cols = list(df.columns)
+    norms = {normalize_cleaning_column_name(c) for c in raw_cols}
+    allowed_raw_norms = {f"{m}_raw" for m in norms}
+
+    synth_norm = normalize_cleaning_column_name(APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN)
+
+    cols_in = _coerce_plan_columns_to_rows(plan.get("columns"))
+
+    def _is_synthetic_row_id(name: str) -> bool:
+        n = str(name).strip()
+        if n == APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN:
+            return True
+        return normalize_cleaning_column_name(n) == synth_norm
+
+    def _row_allowed(name: str) -> bool:
+        """Allow only names that match an input column or ``<norm>_raw`` for that column."""
+        norm_label = normalize_cleaning_column_name(name)
+        if not norm_label:
+            return False
+        if norm_label in norms:
+            return True
+        if norm_label in allowed_raw_norms:
+            return True
+        return False
+
+    kept: list[dict[str, Any]] = []
+    dropped: list[str] = []
+    dropped_synth: list[str] = []
+    for row in cols_in:
+        if not isinstance(row, dict):
+            continue
+        nm = row.get("name")
+        if nm is None:
+            continue
+        label = str(nm).strip()
+        if _is_synthetic_row_id(label):
+            dropped_synth.append(label)
+            continue
+        if _row_allowed(label):
+            kept.append(row)
+        else:
+            dropped.append(label)
+
+    if dropped:
+        logger.info(
+            "Removed cleaning plan column rows not in dataset: %s",
+            sorted(set(dropped)),
+        )
+    if dropped_synth:
+        logger.debug(
+            "Removed synthetic row-id column from cleaning plan: %s",
+            sorted(set(dropped_synth)),
+        )
+
+    out = dict(plan)
+    out["columns"] = kept
+    note_parts: list[str] = []
+    if dropped:
+        note_parts.append(
+            "Plan rows removed (not in input columns): "
+            f"{', '.join(sorted(set(dropped)))}."
+        )
+    if note_parts:
+        prev = str(out.get("notes") or "").strip()
+        tag = " ".join(note_parts)
+        out["notes"] = f"{tag} {prev}".strip() if prev else tag
+    return out
+
+
+def run_cleaner_code_on_dataframe(
+    code: str,
+    df: pd.DataFrame,
+    *,
+    function_name: str = "data_cleaner",
+) -> tuple[pd.DataFrame | None, str | None]:
+    """
+    Execute generated cleaner code once on ``df``.
+
+    Parameters
+    ----------
+    code
+        Full Python source defining ``function_name``.
+    df
+        Input frame (same contract as ``execute_stored_cleaning``).
+    function_name
+        Name of the callable to invoke from ``code``.
+
+    Returns
+    -------
+    tuple
+        ``(cleaned_df, None)`` on success, or ``(None, error_message)`` on failure.
+    """
+    state = {
+        "data_raw": df.to_dict(),
+        "data_cleaner_function": code,
+        "data_cleaner_function_name": function_name,
+    }
+    out = execute_agent_code(
+        state=state,
+        data_key="data_raw",
+        result_key="data_cleaned",
+        error_key="data_cleaner_error",
+        code_snippet_key="data_cleaner_function",
+        agent_function_name=function_name,
+    )
+    err = out.get("data_cleaner_error")
+    if err:
+        return None, str(err)
+    raw = out.get("data_cleaned")
+    if raw is None:
+        return None, "cleaner returned no result"
+    return pd.DataFrame.from_dict(raw), None
+
+
+def summarize_cleaning_row_effects(
+    df_before: pd.DataFrame,
+    df_after: pd.DataFrame,
+    *,
+    row_id_col: str = APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN,
+) -> dict[str, Any]:
+    """
+    Summarize row removals between two frames for plan UI labels.
+
+    Uses ``row_id_col`` when present in both frames to count removed row ids and
+    how many removed rows were all-null on non-id columns in ``df_before``.
+
+    Parameters
+    ----------
+    df_before
+        Frame passed into the cleaner (includes synthetic row id when used).
+    df_after
+        Returned cleaned frame.
+    row_id_col
+        Stable row identifier column for alignment.
+
+    Returns
+    -------
+    dict
+        Keys: ``n_in``, ``n_out``, ``removed_total``, and optionally
+        ``removed_all_null_raw_user_cols`` (int or None).
+    """
+    n_in = len(df_before)
+    n_out = len(df_after)
+    removed_total = n_in - n_out
+    result: dict[str, Any] = {
+        "n_in": n_in,
+        "n_out": n_out,
+        "removed_total": removed_total,
+        "removed_all_null_raw_user_cols": None,
+    }
+    if row_id_col not in df_before.columns or row_id_col not in df_after.columns:
+        return result
+    user_cols = [c for c in df_before.columns if c != row_id_col]
+    if not user_cols:
+        result["removed_all_null_raw_user_cols"] = 0
+        return result
+    try:
+        in_ids = set(df_before[row_id_col].tolist())
+        out_ids = set(df_after[row_id_col].tolist())
+    except TypeError, ValueError:
+        return result
+    dropped_mask = df_before[row_id_col].isin(in_ids - out_ids)
+    if not dropped_mask.any():
+        result["removed_all_null_raw_user_cols"] = 0
+        return result
+    all_null_raw = df_before.loc[dropped_mask, user_cols].isna().all(axis=1)
+    result["removed_all_null_raw_user_cols"] = int(all_null_raw.sum())
+    return result
 
 
 @dataclass(frozen=True)
@@ -77,6 +318,50 @@ class PythonOutputParser(BaseOutputParser):
         if python_code_match:
             return python_code_match.group(1).strip()
         return text
+
+
+class DataCleaningOutputParser(BaseOutputParser):
+    """Extract Python code and optional JSON cleaning plan from LLM responses."""
+
+    @property
+    def _type(self) -> str:
+        return "data_cleaning_dual_output"
+
+    def parse(self, text: str) -> dict[str, Any]:
+        """
+        Parse ``text`` into code and an optional structured plan.
+
+        Returns
+        -------
+        dict
+            Keys: ``code`` (str), ``cleaning_plan`` (dict or None if missing/invalid).
+        """
+        python_code_match = re.search(
+            r"```python(.*?)```", text, re.DOTALL | re.IGNORECASE
+        )
+        if python_code_match:
+            code = python_code_match.group(1).strip()
+        else:
+            code = text.strip()
+
+        json_match = re.search(r"```json(.*?)```", text, re.DOTALL | re.IGNORECASE)
+        plan: dict[str, Any] | None = None
+        if json_match:
+            raw_json = json_match.group(1).strip()
+            try:
+                loaded = json.loads(raw_json)
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Invalid JSON in cleaning plan block; treating plan as None."
+                )
+            else:
+                plan = loaded if isinstance(loaded, dict) else None
+                if loaded is not None and not isinstance(loaded, dict):
+                    logger.warning(
+                        "Cleaning plan JSON was not an object; treating plan as None."
+                    )
+
+        return {"code": code, "cleaning_plan": plan}
 
 
 def _sample_values(series: pd.Series, n: int = 3) -> list[Any]:
@@ -340,8 +625,16 @@ def execute_agent_code(
         result = agent_function(df)
         if isinstance(result, pd.DataFrame):
             result = result.to_dict()
+    except KeyError as e:
+        logger.error("Execution failed: %s", e)
+        agent_error = (
+            "An error occurred during data cleaning: missing column or label "
+            f"{str(e)!r}. If this name was removed in pipeline steps 6–7 (high "
+            "missingness, constant, or all-null), the cleaner must not reference "
+            "it in later steps—use only columns still on df after those drops."
+        )
     except Exception as e:
-        logger.error(f"Execution failed: {e}")
+        logger.error("Execution failed: %s", e)
         agent_error = f"An error occurred during data cleaning: {str(e)}"
 
     return {result_key: result, error_key: agent_error}
@@ -355,6 +648,7 @@ def fix_agent_code(
     prompt_template,
     function_name,
     retry_count_key="retry_count",
+    output_parser: BaseOutputParser | None = None,
 ):
     """
     Fix errors in the generated agent code using the LLM.
@@ -375,6 +669,10 @@ def fix_agent_code(
         Name of the function being fixed.
     retry_count_key : str, optional
         Key in state for tracking retry count. Defaults to "retry_count".
+    output_parser : BaseOutputParser, optional
+        Parser for the LLM response. Defaults to :class:`PythonOutputParser`.
+        If the parser returns a dict with keys ``code`` and ``cleaning_plan``,
+        those are merged into the returned state update.
 
     Returns
     -------
@@ -393,10 +691,18 @@ def fix_agent_code(
         function_name=function_name,
     )
 
-    response = (llm | PythonOutputParser()).invoke(prompt)
+    parser = output_parser or PythonOutputParser()
+    response = (llm | parser).invoke(prompt)
 
-    return {
-        code_snippet_key: response,
+    out: dict[str, Any] = {
         error_key: None,
         retry_count_key: state.get(retry_count_key) + 1,
     }
+    if isinstance(response, dict) and "code" in response:
+        out[code_snippet_key] = response["code"]
+        if "cleaning_plan" in response:
+            out["cleaning_plan"] = response["cleaning_plan"]
+    else:
+        out[code_snippet_key] = response
+
+    return out

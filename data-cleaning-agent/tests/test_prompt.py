@@ -1,5 +1,8 @@
 import pytest
-from data_cleaning_agent.data_cleaning_agent import _DATA_CLEANING_PROMPT_TEMPLATE
+from data_cleaning_agent.data_cleaning_agent import (
+    _DATA_CLEANING_PROMPT_TEMPLATE,
+    _FIX_DATA_CLEANER_PROMPT_TEMPLATE,
+)
 from langchain_core.prompts import PromptTemplate
 
 
@@ -22,6 +25,13 @@ def test_prompt_renders_with_only_expected_variables():
         function_name="data_cleaner",
     )
     assert "data_cleaner(data_raw)" in rendered
+    assert "```json" in rendered
+    assert "row_ops" in rendered
+    assert "drop column (>40% missing)" in rendered
+    assert "rows removed" in rendered
+    assert "impute missing values (mode)" in rendered
+    assert "only numeric" in rendered
+    assert "employee_id" in rendered
     assert "<u>" in rendered
     assert "<sup>" in rendered
     assert "<s>" in rendered
@@ -47,3 +57,17 @@ def test_render_check_rejects_unescaped_braces():
             all_datasets_summary="<s>",
             function_name="data_cleaner",
         )
+
+
+@pytest.mark.unit
+def test_fix_prompt_formats_with_expected_placeholders():
+    """Fix prompt is loaded from markdown; ``fix_agent_code`` uses ``str.format``."""
+    rendered = _FIX_DATA_CLEANER_PROMPT_TEMPLATE.format(
+        function_name="data_cleaner",
+        code_snippet="def data_cleaner(df):\n    return df",
+        error="TypeError: ...",
+    )
+    assert "data_cleaner" in rendered
+    assert "```python" in rendered
+    assert "TypeError" in rendered
+    assert "def data_cleaner(df):" in rendered

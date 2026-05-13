@@ -2,7 +2,6 @@ import math
 from unittest.mock import MagicMock
 
 import pytest
-
 from data_cleaning_agent.utils import (
     PythonOutputParser,
     execute_agent_code,
@@ -45,10 +44,16 @@ class TestGetDataFrameSummary:
             pytest.param("country", "id_like", False, id="id_like-false-country"),
             pytest.param("signup_date", "looks_date_like", True, id="date_like-true"),
             pytest.param("country", "looks_date_like", False, id="date_like-false"),
-            pytest.param("income_str", "looks_numeric_string_like", True, id="numstr-true"),
-            pytest.param("country", "looks_numeric_string_like", False, id="numstr-false"),
+            pytest.param(
+                "income_str", "looks_numeric_string_like", True, id="numstr-true"
+            ),
+            pytest.param(
+                "country", "looks_numeric_string_like", False, id="numstr-false"
+            ),
             pytest.param("is_active", "looks_boolean_like", True, id="bool-true"),
-            pytest.param("country", "looks_boolean_like", False, id="bool-false-3values"),
+            pytest.param(
+                "country", "looks_boolean_like", False, id="bool-false-3values"
+            ),
         ],
     )
     def test_detection_flag(self, summary, col, flag, expected):
@@ -158,13 +163,27 @@ class TestExecuteAgentCode:
         assert out["error"].startswith("An error occurred during data cleaning:")
         assert "boom" in out["error"]
 
+    def test_keyerror_message_hints_dropped_columns(self):
+        state = {
+            "data": {"a": [1]},
+            "code": "def clean(df):\n    return df['missing_col']\n",
+        }
+
+        out = execute_agent_code(state, "data", "code", "result", "error", "clean")
+
+        assert out["result"] is None
+        assert "missing_col" in (out["error"] or "")
+        assert "steps 6–7" in (out["error"] or "")
+
     def test_raises_when_named_function_not_in_generated_code(self):
         state = {
             "data": {"a": [1]},
             "code": "def other(df):\n    return df\n",
         }
 
-        with pytest.raises(ValueError, match="Function 'clean' not found in generated code."):
+        with pytest.raises(
+            ValueError, match="Function 'clean' not found in generated code."
+        ):
             execute_agent_code(state, "data", "code", "result", "error", "clean")
 
 

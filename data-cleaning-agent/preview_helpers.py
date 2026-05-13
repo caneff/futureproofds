@@ -8,6 +8,7 @@ from typing import Any, cast
 import pandas as pd
 from datacompy.core import Compare
 
+# Must match data_cleaning_agent.utils.APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN
 AGENT_ROW_ID = "__agent_row_id__"
 
 
