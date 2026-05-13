@@ -22,6 +22,7 @@ from preview_helpers import (
     reorder_cleaned_for_export,
     style_preview_pair,
 )
+from row_stats_narrative import glossary_bullets, verified_row_stats_strip_items
 
 load_dotenv()
 
@@ -344,29 +345,39 @@ if uploaded_file:
                 if isinstance(stats, dict) and not stats.get("error"):
                     if stats.get("removed_total", 0) == 0 and "n_in" in stats:
                         show_row_ops = False
+
+                st.markdown("**Plan vs verified run**")
+                st.caption(
+                    "Plan text = intent. Metrics = one run of the current generated "
+                    "code on this upload."
+                )
+                st.markdown("**Verified row counts**")
+                st.caption("One run of the current generated code on this upload.")
+                strip_items = (
+                    verified_row_stats_strip_items(stats)
+                    if isinstance(stats, dict)
+                    else None
+                )
+                if strip_items is not None:
+                    cols_strip = st.columns(len(strip_items))
+                    for col_slot, (lbl, val) in zip(
+                        cols_strip, strip_items, strict=True
+                    ):
+                        with col_slot:
+                            st.metric(label=lbl, value=val)
+                elif isinstance(stats, dict) and stats.get("error"):
+                    st.warning(f"Counts unavailable: {stats['error']}")
+
                 if show_row_ops:
                     st.markdown("**Row operations**")
+                    st.caption("From the plan JSON (model intent).")
                     for op in row_ops:
                         st.write(f"- {op}")
-                if isinstance(stats, dict):
-                    if stats.get("error"):
-                        st.caption(
-                            "Could not verify row counts (cleaner failed when run for "
-                            f"measurement): {stats['error']}"
-                        )
-                    elif "n_in" in stats and "n_out" in stats:
-                        if stats.get("removed_total", 0) > 0:
-                            st.caption(
-                                "Verified for this dataset (one execution of the generated "
-                                f"cleaner): {stats['n_in']:,} → {stats['n_out']:,} rows "
-                                f"({stats['removed_total']:,} removed in total)."
-                            )
-                            rnull = stats.get("removed_all_null_input_user_cols")
-                            if rnull is not None:
-                                st.caption(
-                                    f"Of removed rows, {rnull:,} were all-null on original "
-                                    "data columns (excluding the synthetic row id) before cleaning."
-                                )
+
+                with st.expander("What do these numbers mean?", expanded=False):
+                    for line in glossary_bullets():
+                        st.markdown(line)
+
                 if notes:
                     st.markdown("**Notes**")
                     st.write(notes)
@@ -478,7 +489,7 @@ if uploaded_file:
         plan_dirty = bool(st.session_state.get("plan_dirty"))
         if plan_dirty:
             st.caption("Apply cleaning is disabled until code matches the plan.")
-        if st.button("Apply cleaning", disabled=plan_dirty):
+        if st.button("Apply Cleaning", disabled=plan_dirty):
             with st.spinner("Applying cleaning..."):
                 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
                 agent = LightweightDataCleaningAgent(model=llm, log=True)
