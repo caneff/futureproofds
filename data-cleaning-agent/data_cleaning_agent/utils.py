@@ -14,7 +14,16 @@ logger = logging.getLogger(__name__)
 # Casefolded tokens that boolean-like detection accepts as members of a binary
 # categorical (e.g. "Yes"/"No", "true"/"false", "T"/"F", "0"/"1").
 _BOOL_LIKE_TOKENS = frozenset({
-    "yes", "no", "true", "false", "t", "f", "y", "n", "0", "1",
+    "yes",
+    "no",
+    "true",
+    "false",
+    "t",
+    "f",
+    "y",
+    "n",
+    "0",
+    "1",
 })
 
 
@@ -64,7 +73,7 @@ class PythonOutputParser(BaseOutputParser):
 
     def parse(self, text: str):
         """Extract code from ```python``` blocks or return text as-is."""
-        python_code_match = re.search(r'```python(.*?)```', text, re.DOTALL)
+        python_code_match = re.search(r"```python(.*?)```", text, re.DOTALL)
         if python_code_match:
             return python_code_match.group(1).strip()
         return text
@@ -108,7 +117,9 @@ def _top_categories(series: pd.Series, n: int = 3) -> list[dict]:
     if non_null.empty:
         return []
     counts = non_null.value_counts(normalize=True).head(n)
-    return [{"value": str(v), "pct": round(float(p) * 100, 2)} for v, p in counts.items()]
+    return [
+        {"value": str(v), "pct": round(float(p) * 100, 2)} for v, p in counts.items()
+    ]
 
 
 def _detect_id_like(series: pd.Series, n_rows: int, cardinality: int) -> bool:
@@ -158,8 +169,11 @@ def _summarize_column(name: str, series: pd.Series, n_rows: int) -> ColumnSummar
     """Build a ColumnSummary for a single DataFrame column."""
     cardinality = int(series.nunique(dropna=True))
     is_numeric = pd.api.types.is_numeric_dtype(series)
-    # is_string_dtype covers both legacy object-with-strings and pandas 3.x StringDtype.
-    is_string = pd.api.types.is_string_dtype(series) and not is_numeric
+    # Include object columns so ISO date strings etc. still get string-like
+    # heuristics when pandas does not use StringDtype (common for read_csv).
+    is_string = not is_numeric and (
+        pd.api.types.is_string_dtype(series) or pd.api.types.is_object_dtype(series)
+    )
 
     return ColumnSummary(
         name=name,
@@ -169,12 +183,18 @@ def _summarize_column(name: str, series: pd.Series, n_rows: int) -> ColumnSummar
         sample_values=_sample_values(series),
         numeric_stats=_numeric_stats(series) if is_numeric else None,
         top_categories=(
-            _top_categories(series) if not is_numeric and 0 < cardinality <= 20 else None
+            _top_categories(series)
+            if not is_numeric and 0 < cardinality <= 20
+            else None
         ),
         id_like=_detect_id_like(series, n_rows, cardinality),
         looks_date_like=_detect_date_like(series) if is_string else False,
-        looks_numeric_string_like=_detect_numeric_string_like(series) if is_string else False,
-        looks_boolean_like=_detect_boolean_like(series, cardinality) if is_string else False,
+        looks_numeric_string_like=_detect_numeric_string_like(series)
+        if is_string
+        else False,
+        looks_boolean_like=_detect_boolean_like(series, cardinality)
+        if is_string
+        else False,
     )
 
 
@@ -243,11 +263,17 @@ def format_dataframe_summary(summary: DataFrameSummary) -> str:
                 f"median={s.median:.2f}, std={s.std:.2f}, skew={s.skew:.2f}"
             )
         if col.top_categories:
-            cats = ", ".join(f"{c['value']} ({c['pct']:.1f}%)" for c in col.top_categories)
+            cats = ", ".join(
+                f"{c['value']} ({c['pct']:.1f}%)" for c in col.top_categories
+            )
             lines.append(f"  top categories: {cats}")
         if col.id_like:
             lines.append("  id_like: True")
-        if col.looks_date_like or col.looks_numeric_string_like or col.looks_boolean_like:
+        if (
+            col.looks_date_like
+            or col.looks_numeric_string_like
+            or col.looks_boolean_like
+        ):
             lines.append(
                 f"  detection: date_like={col.looks_date_like}, "
                 f"numeric_string_like={col.looks_numeric_string_like}, "
@@ -257,10 +283,12 @@ def format_dataframe_summary(summary: DataFrameSummary) -> str:
     return "\n".join(lines).rstrip()
 
 
-def execute_agent_code(state, data_key, code_snippet_key, result_key, error_key, agent_function_name):
+def execute_agent_code(
+    state, data_key, code_snippet_key, result_key, error_key, agent_function_name
+):
     """
     Execute the generated agent code on the data.
-    
+
     Parameters
     ----------
     state : dict
@@ -275,27 +303,29 @@ def execute_agent_code(state, data_key, code_snippet_key, result_key, error_key,
         Key to store any error message in.
     agent_function_name : str
         Name of the function to execute from the generated code.
-    
+
     Returns
     -------
     dict
         Dictionary with result and error keys.
     """
     logger.info("Executing agent code")
-    
+
     data = state.get(data_key)
     agent_code = state.get(code_snippet_key)
     df = pd.DataFrame.from_dict(data)
-    
+
     # exec() runs LLM-generated code in an isolated namespace; only use with trusted models.
     local_vars = {}
     global_vars = {}
     exec(agent_code, global_vars, local_vars)
-    
+
     agent_function = local_vars.get(agent_function_name)
     if not agent_function or not callable(agent_function):
-        raise ValueError(f"Function '{agent_function_name}' not found in generated code.")
-    
+        raise ValueError(
+            f"Function '{agent_function_name}' not found in generated code."
+        )
+
     agent_error = None
     result = None
     try:
@@ -305,14 +335,22 @@ def execute_agent_code(state, data_key, code_snippet_key, result_key, error_key,
     except Exception as e:
         logger.error(f"Execution failed: {e}")
         agent_error = f"An error occurred during data cleaning: {str(e)}"
-    
+
     return {result_key: result, error_key: agent_error}
 
 
-def fix_agent_code(state, code_snippet_key, error_key, llm, prompt_template, function_name, retry_count_key="retry_count"):
+def fix_agent_code(
+    state,
+    code_snippet_key,
+    error_key,
+    llm,
+    prompt_template,
+    function_name,
+    retry_count_key="retry_count",
+):
     """
     Fix errors in the generated agent code using the LLM.
-    
+
     Parameters
     ----------
     state : dict
@@ -329,7 +367,7 @@ def fix_agent_code(state, code_snippet_key, error_key, llm, prompt_template, fun
         Name of the function being fixed.
     retry_count_key : str, optional
         Key in state for tracking retry count. Defaults to "retry_count".
-    
+
     Returns
     -------
     dict
@@ -337,20 +375,20 @@ def fix_agent_code(state, code_snippet_key, error_key, llm, prompt_template, fun
     """
     logger.info("Fixing agent code")
     logger.debug(f"Retry count: {state.get(retry_count_key)}")
-    
+
     code_snippet = state.get(code_snippet_key)
     error_message = state.get(error_key)
-    
+
     prompt = prompt_template.format(
         code_snippet=code_snippet,
         error=error_message,
         function_name=function_name,
     )
-    
+
     response = (llm | PythonOutputParser()).invoke(prompt)
-    
+
     return {
         code_snippet_key: response,
         error_key: None,
-        retry_count_key: state.get(retry_count_key) + 1
+        retry_count_key: state.get(retry_count_key) + 1,
     }
