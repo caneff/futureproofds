@@ -446,10 +446,11 @@ def summarize_cleaning_row_effects(
     try:
         in_ids = set(df_before[row_id_col].tolist())
         out_ids = set(df_after[row_id_col].tolist())
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return result
-    dropped_mask = df_before[row_id_col].isin(in_ids - out_ids)
-    if not dropped_mask.any():
+    dropped_ids = list(in_ids - out_ids)
+    dropped_mask = df_before[row_id_col].isin(dropped_ids)
+    if int(dropped_mask.sum()) == 0:
         result["removed_all_null_input_user_cols"] = 0
         return result
     all_null_input = df_before.loc[dropped_mask, user_cols].isna().all(axis=1)
