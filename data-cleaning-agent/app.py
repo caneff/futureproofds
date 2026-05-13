@@ -6,6 +6,11 @@ from hashlib import md5
 
 import pandas as pd
 import streamlit as st
+from cleaning_outcome_summary import (
+    build_cleaning_outcome_facts,
+    format_outcome_summary_markdown,
+    outcome_facts_show_any_change,
+)
 from data_cleaning_agent import LightweightDataCleaningAgent
 from data_cleaning_agent.utils import (
     merged_plan_actions_by_column,
@@ -22,10 +27,6 @@ from preview_helpers import (
     reorder_cleaned_for_export,
     style_preview_pair,
 )
-from cleaning_outcome_summary import (
-    build_cleaning_outcome_facts,
-    format_outcome_summary_markdown,
-)
 from row_stats_narrative import glossary_bullets, verified_row_stats_strip_items
 
 load_dotenv()
@@ -38,6 +39,10 @@ st.set_page_config(
 st.title("🧹 Data Cleaning Agent")
 
 MAX_EXECUTE_FIXES = 3
+
+# ``except (TypeError, ValueError)`` is correct Python but some formatters rewrite it
+# to ``except TypeError, ValueError`` (different semantics). Bind the tuple once.
+_INT_PARSE_ERRORS = (TypeError, ValueError)
 
 
 def _plan_step_checkbox_key(
@@ -347,7 +352,11 @@ if uploaded_file:
                 stats = st.session_state.get("plan_row_stats")
                 show_row_ops = bool(row_ops)
                 if isinstance(stats, dict) and not stats.get("error"):
-                    if stats.get("removed_total", 0) == 0 and "n_in" in stats:
+                    try:
+                        rt = int(stats.get("removed_total", 0))
+                    except TypeError, ValueError:
+                        rt = 0
+                    if rt == 0 and "n_in" in stats:
                         show_row_ops = False
 
                 st.markdown("**Plan vs verified run**")
@@ -607,17 +616,18 @@ if uploaded_file:
                 max_k = 1
                 default_k = 1
             _preview_k_state = "cleaning_preview_k"
-            if _preview_k_state in st.session_state:
+            if _preview_k_state not in st.session_state:
+                st.session_state[_preview_k_state] = default_k
+            else:
                 try:
                     cur = int(st.session_state[_preview_k_state])
-                except (TypeError, ValueError):
+                except _INT_PARSE_ERRORS:
                     cur = default_k
                 st.session_state[_preview_k_state] = min(max(cur, 1), max_k)
             k_preview = st.slider(
                 "Preview rows (k)",
                 min_value=1,
                 max_value=max_k,
-                value=default_k,
                 step=1,
                 help=(
                     "Up to this many preview rows: every differing row is "
@@ -660,8 +670,8 @@ if uploaded_file:
                 )
             if not preview.aligned:
                 st.warning(
-                    "Could not align rows on the synthetic id column "
-                    f"({AGENT_ROW_ID}); previews compare rows **by position**, show "
+                    "Could not align rows on the **synthetic row id** this app adds "
+                    "for matching; previews compare rows **by position**, show "
                     "up to **k** rows with the most column changes (ties: earlier "
                     "row first). Rows may not correspond to the same logical record."
                 )
@@ -670,10 +680,9 @@ if uploaded_file:
                 df_cleaned_stored,
                 row_id_col=AGENT_ROW_ID,
             )
-            st.markdown("### What actually changed (verified run)")
-            st.markdown(
-                format_outcome_summary_markdown(facts, row_id_label=AGENT_ROW_ID)
-            )
+            if outcome_facts_show_any_change(facts):
+                with st.expander("What Actually Changed", expanded=False):
+                    st.markdown(format_outcome_summary_markdown(facts))
             stats_for_warn = st.session_state.get("plan_row_stats")
             if isinstance(stats_for_warn, dict) and stats_for_warn.get("error"):
                 st.caption(

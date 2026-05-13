@@ -6,13 +6,51 @@ import logging
 from typing import Any
 
 import pandas as pd
-
-from data_cleaning_agent.utils import sparse_missing_share, summarize_cleaning_row_effects
+from data_cleaning_agent.utils import (
+    APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN,
+    first_column_as_series,
+    sparse_missing_share,
+    summarize_cleaning_row_effects,
+)
+from pandas.api.types import is_dtype_equal
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_HIGH_MISSING = 0.4
 DEFAULT_NULL_TOP_K = 10
+
+
+def _column_heading(name: str) -> str:
+    """Label for markdown; hide internal synthetic row-id column name."""
+    if str(name).strip() == APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN:
+        return "synthetic alignment column (app-injected)"
+    return str(name)
+
+
+def _series_equal_ignoring_dtype(left: pd.Series, right: pd.Series) -> bool:
+    """True when column values match for cleaning-summary purposes.
+
+    Suppresses dtype-only drift (e.g. ``int64`` vs ``int32``, ``object`` vs
+    ``string``) so the UI does not report a dtype change when the run did not
+    materially alter values.
+    """
+    if left.shape[0] != right.shape[0]:
+        return False
+    if left.equals(right):
+        return True
+    l = left.reset_index(drop=True)
+    r = right.reset_index(drop=True)
+    try:
+        pd.testing.assert_series_equal(
+            l,
+            r,
+            check_dtype=False,
+            check_names=False,
+        )
+    except AssertionError:
+        return False
+    else:
+        return True
 
 
 def build_cleaning_outcome_facts(
@@ -52,37 +90,38 @@ def build_cleaning_outcome_facts(
     for name in shared:
         if name == row_id_col:
             continue
-        bdt = str(df_before[name].dtype)
-        adt = str(df_after[name].dtype)
-        if bdt != adt:
-            dtype_changed.append(
-                {"name": name, "before_dtype": bdt, "after_dtype": adt}
-            )
+        b_ser = first_column_as_series(df_before, name)
+        a_ser = first_column_as_series(df_after, name)
+        if is_dtype_equal(b_ser.dtype, a_ser.dtype):
+            continue
+        if _series_equal_ignoring_dtype(b_ser, a_ser):
+            continue
+        dtype_changed.append({
+            "name": name,
+            "before_dtype": str(b_ser.dtype),
+            "after_dtype": str(a_ser.dtype),
+        })
 
     null_deltas: list[dict[str, Any]] = []
     for name in shared:
         if name == row_id_col:
             continue
-        bmiss = int(df_before[name].isna().sum())
-        amiss = int(df_after[name].isna().sum())
+        bmiss = int(first_column_as_series(df_before, name).isna().sum())
+        amiss = int(first_column_as_series(df_after, name).isna().sum())
         delta = amiss - bmiss
         if delta != 0:
-            null_deltas.append(
-                {
-                    "column": name,
-                    "missing_before": bmiss,
-                    "missing_after": amiss,
-                    "delta": delta,
-                }
-            )
+            null_deltas.append({
+                "column": name,
+                "missing_before": bmiss,
+                "missing_after": amiss,
+                "delta": delta,
+            })
     null_deltas.sort(key=lambda r: abs(r["delta"]), reverse=True)
     null_deltas = null_deltas[:null_top_k]
 
     drop_reasons: list[dict[str, str]] = []
     for col in dropped:
-        col_s = df_before[col]
-        if isinstance(col_s, pd.DataFrame):
-            col_s = col_s.iloc[:, 0]
+        col_s = first_column_as_series(df_before, col)
         if sparse_missing_share(col_s) > high_missing_threshold:
             drop_reasons.append({"column": col, "tag": "step_3_high_missing"})
         else:
@@ -102,8 +141,8 @@ def build_cleaning_outcome_facts(
                 df_before, df_after, row_id_col=row_id_col
             )
             rows["removed_total"] = int(stats.get("removed_total", 0))
-            in_ids = set(df_before[row_id_col].tolist())
-            out_ids = set(df_after[row_id_col].tolist())
+            in_ids = set(first_column_as_series(df_before, row_id_col).tolist())
+            out_ids = set(first_column_as_series(df_after, row_id_col).tolist())
             rows["added_rows_only_in_after"] = int(len(out_ids - in_ids))
         except (TypeError, ValueError, KeyError) as e:
             logger.warning("Row effect summary skipped: %s", e)
@@ -123,34 +162,27 @@ def build_cleaning_outcome_facts(
     }
 
 
-def format_outcome_summary_markdown(
-    facts: dict[str, Any],
-    *,
-    row_id_label: str,
-) -> str:
-    """Return markdown for Streamlit. ``row_id_label`` is display text only."""
+def outcome_facts_show_any_change(facts: dict[str, Any]) -> bool:
+    """True when before/after differ in shape, columns, dtypes, nulls, or enforced drops."""
+    rows = facts.get("rows") or {}
+    if int(rows.get("n_before", 0)) != int(rows.get("n_after", 0)):
+        return True
+    cols = facts.get("columns") or {}
+    if cols.get("dropped") or cols.get("added") or cols.get("dtype_changed"):
+        return True
+    if facts.get("null_deltas"):
+        return True
+    if facts.get("drop_reasons"):
+        return True
+    return False
+
+
+def format_outcome_summary_markdown(facts: dict[str, Any]) -> str:
+    """Return markdown for Streamlit."""
     lines: list[str] = []
     r = facts["rows"]
     lines.append("**Rows**")
-    lines.append(
-        f"- Row count: **{r['n_before']:,}** → **{r['n_after']:,}**"
-    )
-    if r.get("aligned") and r.get("removed_total") is not None:
-        lines.append(
-            f"- By `{row_id_label}`: **{int(r['removed_total']):,}** rows removed "
-            "relative to upload (intersection id logic)."
-        )
-        add_only = r.get("added_rows_only_in_after")
-        if add_only is not None and int(add_only) > 0:
-            lines.append(
-                f"- By `{row_id_label}`: **{int(add_only):,}** row ids only in cleaned "
-                "(new or duplicated ids)."
-            )
-    else:
-        lines.append(
-            "- Row id alignment: **unavailable** or incomplete; id-based removed / "
-            "added counts are omitted."
-        )
+    lines.append(f"- Row count: **{r['n_before']:,}** → **{r['n_after']:,}**")
 
     cols = facts["columns"]
     lines.append("")
@@ -159,42 +191,36 @@ def format_outcome_summary_markdown(
     added = cols.get("added") or []
     lines.append(
         f"- Dropped ({len(dropped)}): "
-        + (", ".join(f"`{c}`" for c in dropped) if dropped else "—")
+        + (", ".join(f"`{_column_heading(c)}`" for c in dropped) if dropped else "—")
     )
     lines.append(
         f"- Added ({len(added)}): "
-        + (", ".join(f"`{c}`" for c in added) if added else "—")
+        + (", ".join(f"`{_column_heading(c)}`" for c in added) if added else "—")
     )
 
     dtc = cols.get("dtype_changed") or []
-    lines.append("")
-    lines.append("**Dtype changes**")
-    if not dtc:
-        lines.append("- —")
-    else:
+    if dtc:
+        lines.append("")
+        lines.append("**Dtype Changes**")
         for e in dtc:
             lines.append(
-                f"- `{e['name']}`: `{e['before_dtype']}` → `{e['after_dtype']}`"
+                f"- `{_column_heading(e['name'])}`: `{e['before_dtype']}` → `{e['after_dtype']}`"
             )
 
     nd = facts.get("null_deltas") or []
-    lines.append("")
-    lines.append("**Missing value count changes (top by |Δ|)**")
-    if not nd:
-        lines.append("- —")
-    else:
+    if nd:
+        lines.append("")
+        lines.append("**Missing Value Count Changes (Top by |Δ|)**")
         for row in nd:
             lines.append(
-                f"- `{row['column']}`: {row['missing_before']} → "
+                f"- `{_column_heading(row['column'])}`: {row['missing_before']} → "
                 f"{row['missing_after']} (Δ {row['delta']:+d})"
             )
 
     dr = facts.get("drop_reasons") or []
-    lines.append("")
-    lines.append("**Dropped columns (tags)**")
-    if not dr:
-        lines.append("- —")
-    else:
+    if dr:
+        lines.append("")
+        lines.append("**Dropped Columns (Tags)**")
         tag_text = {
             "step_3_high_missing": "matches pipeline step 3 "
             "(input missing share > 40%)",
@@ -203,7 +229,7 @@ def format_outcome_summary_markdown(
         for item in dr:
             tag = item.get("tag", "dropped")
             lines.append(
-                f"- `{item['column']}`: **{tag}** — {tag_text.get(tag, tag)}"
+                f"- `{_column_heading(item['column'])}`: **{tag}** — {tag_text.get(tag, tag)}"
             )
 
     return "\n".join(lines)

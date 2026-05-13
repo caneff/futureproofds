@@ -17,6 +17,10 @@ logger = logging.getLogger(__name__)
 # Keep identical; omit from user-facing cleaning plans.
 APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN = "__agent_row_id__"
 
+# int()/tolist() when building row-id sets — use a bound tuple so formatters cannot
+# rewrite ``except (TypeError, ValueError)`` into the comma form (wrong semantics).
+_EXC_ROW_ID_SET_COERCION = (TypeError, ValueError)
+
 # Casefolded tokens that boolean-like detection accepts as members of a binary
 # categorical (e.g. "Yes"/"No", "true"/"false", "T"/"F", "0"/"1").
 _BOOL_LIKE_TOKENS = frozenset({
@@ -441,6 +445,20 @@ def run_cleaner_code_on_dataframe(
     return pd.DataFrame.from_dict(raw), None
 
 
+def first_column_as_series(df: pd.DataFrame, name: str) -> pd.Series:
+    """Return ``df[name]`` as a single Series even when column labels are duplicated.
+
+    Duplicate labels make ``df[name]`` a DataFrame; boolean ops on that object
+    then propagate ambiguous truth-value errors.
+    """
+    sel = df[name]
+    if isinstance(sel, pd.DataFrame):
+        if sel.shape[1] == 0:
+            return pd.Series(dtype=object)
+        return sel.iloc[:, 0]
+    return sel
+
+
 def summarize_cleaning_row_effects(
     df_before: pd.DataFrame,
     df_after: pd.DataFrame,
@@ -484,12 +502,12 @@ def summarize_cleaning_row_effects(
         result["removed_all_null_input_user_cols"] = 0
         return result
     try:
-        in_ids = set(df_before[row_id_col].tolist())
-        out_ids = set(df_after[row_id_col].tolist())
-    except TypeError, ValueError:
+        in_ids = set(first_column_as_series(df_before, row_id_col).tolist())
+        out_ids = set(first_column_as_series(df_after, row_id_col).tolist())
+    except _EXC_ROW_ID_SET_COERCION:
         return result
     dropped_ids = list(in_ids - out_ids)
-    dropped_mask = df_before[row_id_col].isin(dropped_ids)
+    dropped_mask = first_column_as_series(df_before, row_id_col).isin(dropped_ids)
     if int(dropped_mask.sum()) == 0:
         result["removed_all_null_input_user_cols"] = 0
         return result
@@ -652,7 +670,11 @@ def _detect_id_like(series: pd.Series, n_rows: int, cardinality: int) -> bool:
     if str(series.name).lower().endswith(("id", "uuid")):
         return True
     if pd.api.types.is_integer_dtype(series):
-        return bool(series.is_monotonic_increasing and series.is_unique)
+        mono = series.is_monotonic_increasing
+        uniq = series.is_unique
+        if isinstance(mono, pd.Series) or isinstance(uniq, pd.Series):
+            return False
+        return bool(mono) and bool(uniq)
     return False
 
 
