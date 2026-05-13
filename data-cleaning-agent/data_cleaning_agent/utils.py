@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -69,6 +70,104 @@ def _coerce_plan_columns_to_rows(columns: Any) -> list[dict[str, Any]]:
             rows.append({"name": k, "actions": actions})
         return rows
     return []
+
+
+def coerce_cleaning_plan_columns(columns: Any) -> list[dict[str, Any]]:
+    """
+    Normalize ``plan['columns']`` to a list of ``dict`` rows for diffing or editing.
+
+    Accepts the same shapes as :func:`sanitize_cleaning_plan` (list of dicts or
+    name-to-actions mapping dict).
+    """
+    return _coerce_plan_columns_to_rows(columns)
+
+
+def merged_plan_actions_by_column(columns: Any) -> dict[str, list[str]]:
+    """
+    Concatenate ``actions`` for all plan rows that share the same stripped ``name``.
+
+    The model often emits several ``{"name": "<col>", "actions": [...]}`` rows for
+    one column (e.g. early transforms, then a separate imputation or drop row).
+    Merging preserves step order and keeps the UI diff/snapshot logic consistent
+    with multiset helpers that already aggregate by column name.
+
+    Rows whose ``name`` is empty after stripping are skipped.
+
+    Parameters
+    ----------
+    columns
+        ``plan['columns']`` in any shape accepted by :func:`coerce_cleaning_plan_columns`.
+
+    Returns
+    -------
+    dict[str, list[str]]
+        Map stripped column name -> ordered action strings. Key order is first
+        appearance of each name in the coerced row list (Python 3.7+ insertion order).
+    """
+    merged: dict[str, list[str]] = {}
+    for row in coerce_cleaning_plan_columns(columns):
+        nm = str(row.get("name", "")).strip()
+        if not nm:
+            continue
+        raw = row.get("actions")
+        if isinstance(raw, list):
+            acts = [str(x) for x in raw]
+        elif raw is None:
+            acts = []
+        else:
+            acts = [str(raw)]
+        merged.setdefault(nm, []).extend(acts)
+    return merged
+
+
+def removed_plan_actions(
+    before_columns: Any,
+    after_columns: Any,
+) -> list[tuple[str, str]]:
+    """
+    List ``(column_name, action)`` pairs multiset-removed from *before* to *after*.
+
+    Column names are compared as stripped strings. Actions are compared as
+    strings. Duplicate actions in the same column are handled by multiset
+    subtraction.
+
+    Parameters
+    ----------
+    before_columns, after_columns
+        ``plan['columns']`` in any shape accepted by :func:`coerce_cleaning_plan_columns`.
+
+    Returns
+    -------
+    list[tuple[str, str]]
+        Sorted list of removed pairs for stable tests and deterministic prompts.
+    """
+
+    def _action_counter(rows: list[dict[str, Any]]) -> dict[str, Counter[str]]:
+        by_col: dict[str, Counter[str]] = {}
+        for row in rows:
+            name = str(row.get("name", "")).strip()
+            if not name:
+                continue
+            raw = row.get("actions")
+            if isinstance(raw, list):
+                acts = [str(x) for x in raw]
+            elif raw is None:
+                acts = []
+            else:
+                acts = [str(raw)]
+            by_col.setdefault(name, Counter()).update(acts)
+        return by_col
+
+    b = _action_counter(coerce_cleaning_plan_columns(before_columns))
+    a = _action_counter(coerce_cleaning_plan_columns(after_columns))
+    out: list[tuple[str, str]] = []
+    for col, ctr_b in b.items():
+        ctr_a = a.get(col, Counter())
+        for act, n_b in ctr_b.items():
+            removed = n_b - ctr_a.get(act, 0)
+            for _ in range(max(0, removed)):
+                out.append((col, act))
+    return sorted(out)
 
 
 def sanitize_cleaning_plan(
