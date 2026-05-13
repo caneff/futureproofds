@@ -1,3 +1,9 @@
+# Local brainstorm visual companion sessions (superpowers)
+.superpowers/
+
+# Superpowers stuff (local only; not versioned)
+docs/superpowers/
+
 __pycache__/
 *.py[cod]
 .venv/
