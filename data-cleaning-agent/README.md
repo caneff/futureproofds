@@ -106,10 +106,16 @@ cleaned_df.to_csv("cleaned_data.csv", index=False)
 **Optional: Provide custom instructions**
 
 ```python
-# Give specific cleaning instructions to the agent
+# End-user cleaning instructions (columns named here are protected)
 agent.invoke_agent(
     data_raw=df,
     user_instructions="Remove columns with more than 30% missing values and standardize date formats",
+)
+
+# Application-injected hints (separate prompt section; same protection rules)
+agent.invoke_agent(
+    data_raw=df,
+    supplemental_instructions="Preserve column __agent_row_id__ unchanged.",
 )
 ```
 

@@ -8,15 +8,22 @@ def test_prompt_renders_with_only_expected_variables():
     """Catch unescaped {braces} in the prompt without an LLM round-trip."""
     prompt = PromptTemplate(
         template=_DATA_CLEANING_PROMPT_TEMPLATE,
-        input_variables=["user_instructions", "all_datasets_summary", "function_name"],
+        input_variables=[
+            "user_instructions",
+            "supplemental_instructions",
+            "all_datasets_summary",
+            "function_name",
+        ],
     )
     rendered = prompt.format(
         user_instructions="<u>",
+        supplemental_instructions="<sup>",
         all_datasets_summary="<s>",
         function_name="data_cleaner",
     )
     assert "data_cleaner(data_raw)" in rendered
     assert "<u>" in rendered
+    assert "<sup>" in rendered
     assert "<s>" in rendered
 
 
@@ -26,11 +33,17 @@ def test_render_check_rejects_unescaped_braces():
     bad_template = _DATA_CLEANING_PROMPT_TEMPLATE + "\nExample: df.fillna({col: value})"
     prompt = PromptTemplate(
         template=bad_template,
-        input_variables=["user_instructions", "all_datasets_summary", "function_name"],
+        input_variables=[
+            "user_instructions",
+            "supplemental_instructions",
+            "all_datasets_summary",
+            "function_name",
+        ],
     )
     with pytest.raises(KeyError, match="col"):
         prompt.format(
             user_instructions="<u>",
+            supplemental_instructions="<sup>",
             all_datasets_summary="<s>",
             function_name="data_cleaner",
         )

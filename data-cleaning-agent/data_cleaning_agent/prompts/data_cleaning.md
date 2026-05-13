@@ -6,8 +6,8 @@ Follow these rules strictly. Do not reorder steps. Do not skip steps.
 Hard constraints:
 - Start with: df = data_raw.copy(). Never mutate data_raw.
 - Be deterministic. Do not use randomness. If you must, seed it with 0.
-- Never drop or destructively transform any column named in User Instructions.
-  Treat those as protected (target/id columns).
+- Never drop or destructively transform any column named in User Instructions
+  or in Supplemental instructions. Treat those as protected (target/id columns).
 - Preserve original column order except for columns that are dropped.
 - Reset the index at the end after any row drops.
 - Never use inplace=True anywhere. Do not pass `inplace=True` to any pandas
@@ -66,7 +66,7 @@ Pipeline (in order):
      per kind (columns with date_like True, then numeric_string_like True, then
      boolean_like True), and loop only those lists.
 6. Drop columns with more than 40% missing values, EXCEPT any column listed
-   in User Instructions.
+   in User Instructions or Supplemental instructions.
 7. Drop columns that are constant (one unique non-null value) or 100% NaN.
 8. Identify ID-like columns (cardinality == len(df), name ends with "id" or
    "uuid", or strictly monotonically increasing integers). Exempt them from
@@ -93,6 +93,10 @@ Pipeline (in order):
 
 User Instructions:
 {user_instructions}
+
+Supplemental instructions (from the application or host; follow these in addition
+to User Instructions above; columns named here are protected the same way):
+{supplemental_instructions}
 
 Dataset Summary:
 {all_datasets_summary}

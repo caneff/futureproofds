@@ -33,6 +33,7 @@ _DATA_CLEANING_PROMPT_TEMPLATE = _PROMPT_PATH.read_text(encoding="utf-8")
 # during the run rather than requiring all keys up front.
 class GraphState(TypedDict, total=False):
     user_instructions: Required[str | None]
+    supplemental_instructions: str | None
     data_raw: Required[dict]
     max_retries: Required[int]
     retry_count: Required[int]
@@ -101,6 +102,7 @@ class LightweightDataCleaningAgent:
         self,
         data_raw: pd.DataFrame,
         user_instructions: str | None = None,
+        supplemental_instructions: str | None = None,
         max_retries: int = 3,
         retry_count: int = 0,
         config: RunnableConfig | None = None,
@@ -113,10 +115,15 @@ class LightweightDataCleaningAgent:
         data_raw : pd.DataFrame
             Raw dataset to clean.
         user_instructions : str, optional
-            Free-form cleaning instructions. Columns named here are treated as
-            protected and exempt from drops and destructive transforms. When
-            None, the agent applies its full default pipeline. The pipeline is
-            defined in ``data_cleaning_agent/prompts/data_cleaning.md``.
+            Free-form cleaning instructions from the end user. Columns named
+            here are treated as protected and exempt from drops and destructive
+            transforms. When None, the agent applies its full default pipeline.
+            The pipeline is defined in ``data_cleaning_agent/prompts/data_cleaning.md``.
+        supplemental_instructions : str, optional
+            Additional instructions injected by the application (for example
+            stable row identifiers). Shown to the model in a separate prompt
+            section from ``user_instructions``; columns named here are protected
+            the same way as in User Instructions.
         max_retries : int, default=3
             Maximum number of retry attempts if generated code fails.
         retry_count : int, default=0
@@ -132,6 +139,7 @@ class LightweightDataCleaningAgent:
         """
         initial_state: GraphState = {
             "user_instructions": user_instructions,
+            "supplemental_instructions": supplemental_instructions,
             "data_raw": data_raw.to_dict(),
             "max_retries": max_retries,
             "retry_count": retry_count,
@@ -218,6 +226,7 @@ def make_lightweight_data_cleaning_agent(
             template=_DATA_CLEANING_PROMPT_TEMPLATE,
             input_variables=[
                 "user_instructions",
+                "supplemental_instructions",
                 "all_datasets_summary",
                 "function_name",
             ],
@@ -228,6 +237,8 @@ def make_lightweight_data_cleaning_agent(
         response = data_cleaning_agent.invoke({
             "user_instructions": state.get("user_instructions")
             or "Follow the basic cleaning steps.",
+            "supplemental_instructions": state.get("supplemental_instructions")
+            or "(none)",
             "all_datasets_summary": dataset_summary,
             "function_name": function_name,
         })
