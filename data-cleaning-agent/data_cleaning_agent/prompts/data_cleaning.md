@@ -31,14 +31,28 @@ Pipeline (in order):
    that look like categorical labels (not free text), also casefold values.
 4. Replace placeholder strings with NaN in object columns:
    "", "N/A", "n/a", "NA", "null", "NULL", "None", "?", "missing", "-", "unknown".
-5. Coerce dtypes where the column clearly fits:
-   - Date-like strings: pd.to_datetime(col, errors="coerce").
-   - Numeric-looking strings (currency, percent, thousands separators): use a
-     RAW-STRING regex to strip "$", ",", and "%", e.g.
+5. Coerce dtypes using only the Per-column details block in Dataset Summary
+   (not dtype alone). Read each column's detection line when present; if a
+   column has no detection line, treat date_like, numeric_string_like, and
+   boolean_like as False for this step and leave that column to steps 3–4 only
+   (whitespace, placeholders).
+   - Only if date_like=True for that column: apply pd.to_datetime with
+     errors="coerce".
+   - Only if numeric_string_like=True: for numeric-looking strings (currency,
+     percent, thousands separators), use a RAW-STRING regex to strip "$",
+     ",", and "%", e.g.
          df[col] = df[col].str.replace(r"[$,%]", "", regex=True)
      Do NOT use plain-string escapes like "\$" or "\%"; those are invalid
-     escape sequences in Python. Then call pd.to_numeric(col, errors="coerce").
-   - Boolean-like strings ("yes"/"no", "true"/"false", "t"/"f", "0"/"1"): map to bool.
+     escape sequences in Python. Then call pd.to_numeric on that column with
+     errors="coerce".
+   - Only if boolean_like=True: map boolean-like strings ("yes"/"no",
+     "true"/"false", "t"/"f", "0"/"1") to bool.
+   - Forbidden: do not loop over all object or string columns unconditionally
+     running str.replace plus pd.to_numeric on every column; that turns free
+     text (for example person names) into NaN and causes wrongful drops later.
+   - Preferred: parse Dataset Summary and build explicit lists of column names
+     per kind (columns with date_like True, then numeric_string_like True, then
+     boolean_like True), and loop only those lists.
 6. Drop columns with more than 40% missing values, EXCEPT any column listed
    in User Instructions.
 7. Drop columns that are constant (one unique non-null value) or 100% NaN.
