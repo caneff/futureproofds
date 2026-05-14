@@ -215,6 +215,20 @@ class TestExecuteAgentCode:
         assert "Hint:" in err
         assert "index=df.index" in err
 
+    def test_str_accessor_error_includes_dtype_hint(self):
+        state = {
+            "data": {"a": [1, 2]},
+            "code": "def clean(df):\n    _ = df['a'].str.strip()\n    return df\n",
+        }
+
+        out = execute_agent_code(state, "data", "code", "result", "error", "clean")
+
+        assert out["result"] is None
+        err = out["error"] or ""
+        assert ".str accessor" in err or "str accessor" in err
+        assert "Hint:" in err
+        assert "is_object_dtype" in err
+
     def test_raises_when_named_function_not_in_generated_code(self):
         state = {
             "data": {"a": [1]},

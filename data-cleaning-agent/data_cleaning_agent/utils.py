@@ -510,6 +510,13 @@ def execute_agent_code(
                 "`index=df.index`). Assign a scalar, `Series(..., index=df.index)`, "
                 "or `df[other_col].copy()` so the RHS has one value per row."
             )
+        elif ".str accessor" in msg and "string" in msg.lower():
+            hint = (
+                " Hint: `.str` was used on a non-string column. Restrict `.str` to "
+                "object/StringDtype columns (guard with `pd.api.types.is_object_dtype` / "
+                "`is_string_dtype`), or exclude numeric/datetime columns from string-only "
+                "loops."
+            )
         agent_error = f"An error occurred during data cleaning: {msg}{hint}"
 
     return {result_key: result, error_key: agent_error}

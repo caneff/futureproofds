@@ -23,6 +23,10 @@ When correcting, enforce these rules (pandas Copy-on-Write):
 - **Do not** use ``pd.Categorical`` or ``.astype("category")`` for ordinary
   string label columns unless User Instructions explicitly require it.
 - Keep the working frame in df and end with return df.
+- If the error is ``Can only use .str accessor with string values!``, the code
+  called ``.str`` on an int/float/bool/datetime column. Restrict string steps to
+  object/StringDtype columns (see ``is_object_dtype`` / ``is_string_dtype`` guards).
+  Do not cast ``__agent_row_id__`` away from string.
 
 Return **only** one fenced ```python``` block with the full corrected function definition for {function_name} (no preamble, no JSON, no trailing commentary).
 

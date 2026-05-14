@@ -18,6 +18,21 @@ from preview_helpers import (
     style_preview_pair,
 )
 
+
+def _synthetic_row_id_series(index: pd.Index) -> pd.Series:
+    """Stable row keys as pandas string dtype (safe for naive ``.str`` loops in generated code)."""
+    return pd.Series([str(i) for i in range(len(index))], index=index, dtype="string")
+
+
+def _normalize_cleaned_row_id(df: pd.DataFrame) -> pd.DataFrame:
+    """Coerce ``AGENT_ROW_ID`` to str so joins match the upload frame after numeric cleaners."""
+    if AGENT_ROW_ID not in df.columns:
+        return df
+    out = df.copy()
+    out[AGENT_ROW_ID] = out[AGENT_ROW_ID].astype(str)
+    return out
+
+
 load_dotenv()
 
 st.set_page_config(
@@ -65,9 +80,7 @@ if uploaded_file:
             llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
             agent = LightweightDataCleaningAgent(model=llm, log=True)
             df_input = df_uploaded.copy()
-            df_input.insert(
-                0, AGENT_ROW_ID, pd.RangeIndex(stop=len(df_input), dtype="int64")
-            )
+            df_input.insert(0, AGENT_ROW_ID, _synthetic_row_id_series(df_input.index))
             raw_ui = st.session_state.get("cleaning_user_instructions")
             user_instructions = (
                 raw_ui.strip() if isinstance(raw_ui, str) and raw_ui.strip() else None
@@ -113,7 +126,9 @@ if uploaded_file:
                 elif df_pre is None:
                     apply_err = "cleaner returned no result"
                 else:
-                    st.session_state["preview_df_cleaned"] = df_pre
+                    st.session_state["preview_df_cleaned"] = _normalize_cleaned_row_id(
+                        df_pre
+                    )
             if apply_err is not None:
                 st.error(f"Cleaning failed: {apply_err}")
             else:

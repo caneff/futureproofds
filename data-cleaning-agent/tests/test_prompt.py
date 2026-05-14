@@ -55,6 +55,7 @@ def test_pipeline_prompt_renders_with_only_expected_variables():
     assert "<s>" in rendered
     assert "**no** built-in list of" in rendered
     assert "This prompt emits **Python only**" in rendered
+    assert "is_object_dtype" in rendered
 
 
 @pytest.mark.unit
@@ -90,3 +91,4 @@ def test_fix_prompt_formats_with_expected_placeholders():
     assert "TypeError" in rendered
     assert "def data_cleaner(df):" in rendered
     assert "no json" in rendered.lower()
+    assert "Can only use .str accessor" in rendered

@@ -9,7 +9,7 @@ This prompt emits **Python only**—implement the pipeline faithfully in code.
 **User Instructions vs Dataset Summary:** **User Instructions** means **only** the body of text under the ``User Instructions:`` heading at the end of this prompt (the end-user’s words). **Dataset Summary** is separate statistics; listing a column there does **not** mean the user asked to protect it or skip dropping it. Never treat Dataset Summary as User Instructions.
 
 Application synthetic row id (must match the Streamlit app constant ``preview_helpers.AGENT_ROW_ID``, currently ``__agent_row_id__``):
-The column ``__agent_row_id__`` is a synthetic stable key added by the application before cleaning. Do not drop it, rename it, or change its values. Carry it through unchanged for every row that remains in the returned DataFrame so before-and-after rows can be aligned.
+The column ``__agent_row_id__`` is a synthetic stable key added by the application before cleaning (**pandas string dtype**, values ``"0"``, ``"1"``, …). Do not drop it, rename it, or change its values (including **do not** cast it to int/float—alignment with the upload breaks). Carry it through unchanged for every row that remains in the returned DataFrame so before-and-after rows can be aligned.
 
 Hard constraints:
 - Start with: df = source_df.copy(). Never mutate source_df.
@@ -53,6 +53,12 @@ Hard constraints:
   or ``df["department"] = [v1, v2, v3, v4]``. **Right**:
   ``df["department"] = df["department"].copy()`` (same index as ``df``), or assign
   a scalar / ``Series(..., index=df.index)`` aligned to ``df``.
+- **``.str`` only on string-like columns:** ``Series.str`` raises
+  ``Can only use .str accessor with string values!`` on int/float/bool/datetime
+  columns. When applying steps 4–6, only use ``df[col].str...`` where
+  ``pd.api.types.is_object_dtype(df[col]) or pd.api.types.is_string_dtype(df[col])``.
+  The synthetic ``__agent_row_id__`` column is **string** in the host app, so ``.str`` calls
+  there are valid, but **never** cast that column to a numeric dtype.
 
 Pipeline (in order):
 1. df = source_df.copy().
@@ -78,7 +84,7 @@ Pipeline (in order):
    lists (or include **only** names literally present in User Instructions).
    Dropping here **immediately after step
    2** avoids wasted work and wrong imputation paths on columns that are mostly empty.
-4. For object/string columns, **strip leading/trailing whitespace only** on
+4. For object/string columns only (per the ``.str`` rule above), **strip leading/trailing whitespace only** on
    cell values. **Do not** apply ``.str.lower()``, ``.str.casefold()``,
    ``.str.title()``, or other automatic casing changes to label-like columns
    (short status or location labels, free-text fields)—the cleaned export
