@@ -138,8 +138,9 @@ main (always deployable)
 ### Agents: default to feature branches
 
 - **Create a branch and commit there by default** — including small or non-runtime work (e.g. `.cursor/skills/`, rules, `AGENTS.md`, docs-only chores, config). **Do not commit directly on `main`** only because the diff is small or the checkout already happens to be `main`.
-- **Exception:** Commit or push straight to `main` only when the user explicitly asks (e.g. hotfix, “commit on main,” “land on main without a branch,” “skip the feature branch”). State in the change summary that you did so because the user requested it.
-- **Flow:** `git checkout main` → `git pull` → `git checkout -b feature/...` or `chore/...` → implement → commit → merge (or open PR) → push `main` → delete remote feature branch per **After the PR is closed**.
+- **Never merge into `main` or `git push origin main`** (or otherwise publish agent commits to the remote default branch) **unless the user explicitly consents** in plain language (e.g. “merge to main,” “push to main,” “ship to main,” “land on main”). Vague requests (“merge,” “commit and merge”) are **not** consent—**ask** before touching `main`.
+- **Exception:** Commit on `main`, merge to `main`, or push `main` only when the user clearly requests it (e.g. hotfix, “commit on main,” “push to main now”). State in the summary that you did so because the user explicitly asked.
+- **Flow:** `git checkout main` → `git pull` → `git checkout -b feature/...` or `chore/...` → implement → commit → **`git push -u origin <branch>`** (feature branch only). Merging to `main` / pushing `main` is **for the user** unless they explicitly delegate it above.
 
 ### After the PR is closed
 
@@ -306,6 +307,7 @@ git log --grep="validation" --oneline
 - Long-lived branches that diverge significantly from main
 - Force-pushing to shared branches
 - Committing directly to `main` without an explicit user request to do so (agents should use a feature branch; see **Agents: default to feature branches**)
+- Pushing `origin/main` with agent work without an explicit user request to ship to `main`
 
 ## Verification
 
@@ -318,4 +320,4 @@ For every commit:
 - [ ] No formatting-only changes mixed with behavior changes
 - [ ] `.gitignore` covers standard exclusions
 - [ ] After a merged PR: remote feature branch deleted (and pruned locally unless opted out)
-- [ ] Agent work used a feature branch from `main` unless the user explicitly asked for `main` only
+- [ ] Agent work used a feature branch from `main` unless the user explicitly asked for commits on `main` or to push/merge `main`

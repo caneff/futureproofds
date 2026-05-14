@@ -1,0 +1,25 @@
+---
+description: Never merge or push to main without explicit user consent; aligns with AGENTS.md and git-workflow-and-versioning skill.
+alwaysApply: true
+---
+
+# `main` branch: explicit consent only
+
+This repository’s maintainer requires **plain, explicit** permission before any agent integrates work into the default branch (`main`).
+
+## Forbidden without explicit consent
+
+- Merging into `main` (locally or on the remote), including fast-forward.
+- `git push origin main` or any push that lands agent commits on the remote default branch.
+- Inferring consent from ambiguous phrases such as “merge,” “commit and merge,” or “merge existing changes”—**ask** if it is unclear.
+
+## Allowed without special consent
+
+- Create a feature branch from `main`, commit there, push **only** that branch (e.g. `git push -u origin feature/...`).
+- The human merges via PR or runs `main` integration themselves.
+
+## Explicit consent (examples)
+
+Phrases like **“merge to main,” “push to main,” “ship it to main,” “land this on main”** count as explicit consent. If in doubt, stop and ask.
+
+Full project wording: [AGENTS.md](AGENTS.md). Git details: [.cursor/skills/git-workflow-and-versioning/SKILL.md](.cursor/skills/git-workflow-and-versioning/SKILL.md).

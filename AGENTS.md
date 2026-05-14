@@ -18,6 +18,7 @@
 - Confirm before installing new dependencies.
 - Never write secrets, always use environment variables.
 - Always follow the git-workflow-and-versioning skill when committing code or managing branches.
+- **`main` / default branch:** Do **not** merge into `main`, do **not** `git push origin main` (or otherwise publish agent work to the remote default branch), and do **not** treat vague phrasing (“merge,” “commit and merge”) as permission to do so. **Only** when the user **explicitly** asks (e.g. “merge to main,” “push to main,” “ship to main”) may an agent integrate to `main`. Otherwise use a feature branch and push **that branch only**; the user merges (e.g. via PR).
 - Use the PostgreSQL MCP Server tools when querying over creating new code yourself.
 - When asked for visualizations, prefer making jupyter notebooks over scripts that generate raw html.
 
