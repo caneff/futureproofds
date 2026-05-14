@@ -622,9 +622,8 @@ def format_dataframe_summary(summary: DataFrameSummary) -> str:
     Produces the string interpolated into the ``{all_datasets_summary}`` slot of
     the cleaning prompt. Lines are emitted only when relevant (numeric stats
     only for numeric columns, top categories only when populated, detection only
-    when at least one flag is True). Row-key detection for step-9 imputation
-    skips is defined only in the pipeline prompt (step 8) and implemented in
-    generated code, not in this summary.
+    when at least one flag is True). Imputation choices are defined only in the
+    pipeline prompt and implemented in generated code, not in this summary.
 
     Parameters
     ----------

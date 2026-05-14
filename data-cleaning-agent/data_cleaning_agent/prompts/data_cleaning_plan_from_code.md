@@ -1,8 +1,8 @@
 ﻿You are a Data Cleaning Agent. Produce **only** a structured cleaning-plan as a single ```json``` fenced block (valid JSON; no comments inside the JSON).
 
-The application appends the authoritative Python for ``def {function_name}(source_df):`` in a ```python``` fence **immediately after** this instruction text. Read that block first. Your JSON must **faithfully** describe what that Python does (including step 9 imputation vs leaving NaN on each column), not what you wish it did.
+The application appends the authoritative Python for ``def {function_name}(source_df):`` in a ```python``` fence **immediately after** this instruction text. Read that block first. Your JSON must **faithfully** describe what that Python does (including step 8 imputation vs leaving NaN on each column), not what you wish it did.
 
-**Step 9 vs JSON:** Infer from the appended Python whether each string/object column that is **not** a step-8 row key receives a mode ``fillna`` or other imputation. List ``impute missing values (mode)`` (or mean/median as applicable) only when the code actually performs that fill; list ``retain missing values`` when the code leaves missing values unfilled in step 9 for that column yet it survives the pipeline with prior Dataset Summary missingness. Never list ``retain missing values`` for a column the code imputes in step 9.
+**Step 8 vs JSON:** Infer from the appended Python whether each string/object column receives a mode ``fillna`` or other imputation. List ``impute missing values (mode)`` (or mean/median as applicable) only when the code actually performs that fill; list ``retain missing values`` when the code leaves missing values unfilled in step 8 for that column yet it survives the pipeline with prior Dataset Summary missingness. Never list ``retain missing values`` for a column the code imputes in step 8.
 
 User Instructions:
 {user_instructions}
@@ -10,7 +10,7 @@ User Instructions:
 Dataset Summary:
 {all_datasets_summary}
 
-**Immediately before you emit JSON:** if any column will show ``retain missing values`` in ``actions``, step 9 in the appended Python must not fill it; if step 9 fills a column, ``actions`` must include the matching ``impute missing values (...)``---never claim retain and impute the same column in code.
+**Immediately before you emit JSON:** if any column will show ``retain missing values`` in ``actions``, step 8 in the appended Python must not fill it; if step 8 fills a column, ``actions`` must include the matching ``impute missing values (...)``---never claim retain and impute the same column in code.
 
 Use this JSON shape (example only; emit your own values):
 
@@ -67,7 +67,7 @@ Plan JSON rules:
   explicit action, e.g. `"drop column (>40% missing)"`,
   `"drop column (constant or single non-null value)"`,
   `"drop column (100% missing after cleaning)"`, or
-  `"drop column (other: <brief reason>)"`. **Do not** list step 9
+  `"drop column (other: <brief reason>)"`. **Do not** list step 8
   (imputation) for a column dropped in
   step 3 or 7; your Python must not run imputation on removed columns, and the plan must not
   claim it ran. **Never omit** a dropped column from the plan or leave only
@@ -75,7 +75,7 @@ Plan JSON rules:
 - List **every** column you will change, drop, or add (new columns: include
   `name` and `actions`). For **drops**, the last action must always be a
   concrete `"drop column (...)"` as above (not only `row_ops` / `notes`).
-- **Imputation (pipeline step 9)**: any column the code **fills** in this step
+- **Imputation (pipeline step 8)**: any column the code **fills** in this step
   must include an explicit action, e.g.
   `"impute missing values (median)"`, `"impute missing values (mean)"`, or
   `"impute missing values (mode)"`. Do **not** use
@@ -86,21 +86,18 @@ Plan JSON rules:
   instead of inventing imputation. Never skip listing the action when the code
   performs a fill.
   **Low-cardinality strings** (e.g. `city`, `department`, status
-  labels): if step **9** uses mode fill, the plan must list that imputation—**not**
+  labels): if step **8** uses mode fill, the plan must list that imputation—**not**
   only earlier steps like
   `"strip whitespace"`. If no fill runs, prefer
   `"retain missing values"` over fake `"unknown"` imputation lines.
   **Input missingness → plan row:** If Dataset Summary shows **>0%** missing on a
   column and that column survives steps 3–7, the JSON **must** include either an
   explicit imputation action or ``retain missing values`` when the Python leaves
-  missing values unfilled in step 9. Step-8 **row keys** never receive step-9
-  ``fillna``; when they still have missing values, list ``retain missing values``
-  (not a fake imputation line)—even when step 9 only *would* fill because of the mode rule, or
-  when earlier steps (4–6) might change how missingness looks later. Do not ship a
+  missing values unfilled in step 8. Do not ship a
   plan where such a column has only `"normalize name"` / `"strip whitespace"` /
   dtype lines and **neither** impute nor retain.
 - **Hard rule:** If `columns[].actions` for a column includes `"retain missing values"`
-  (or an equivalent explicit retain), **step 9 and any imputation loop must not**
+  (or an equivalent explicit retain), **step 8 and any imputation loop must not**
   fill that column—no `fillna`, mode/mean/median fill, `bfill`/`ffill`, or `replace`
   that reduces nulls on it. The Python must match the JSON; do not list retain and
   then impute in code.
@@ -108,7 +105,7 @@ Plan JSON rules:
   order** for that column (what happens to that column, step by step).
 - If no column-specific work: `"columns": []` and use `row_ops` / `notes`.
 - `row_ops` is an array of strings, one per **row-level** step (e.g. pipeline
-  steps 10–11). Each string must include the **exact number of rows removed**
+  steps 9–10). Each string must include the **exact number of rows removed**
   by that step when run on this dataset, in parentheses, e.g.
   `"drop all-null rows (3 rows removed)"` or `"drop exact duplicate rows (0 rows removed)"`.
   Use **0** when a step runs but removes nothing. Integers must match the

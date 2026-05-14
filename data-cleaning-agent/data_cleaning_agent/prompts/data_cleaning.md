@@ -9,7 +9,7 @@ same source of truth.
 
 | Step | File | Role |
 |------|------|------|
-| 1 | [data_cleaning_code_only.md](./data_cleaning_code_only.md) | Full default **pipeline** (steps 1–12), hard constraints, synthetic row id (`__agent_row_id__`) rules for Streamlit alignment, step 9 imputation rules, **Python-only** output. |
+| 1 | [data_cleaning_code_only.md](./data_cleaning_code_only.md) | Full default **pipeline** (steps 1–11), hard constraints, synthetic row id (`__agent_row_id__`) rules for Streamlit alignment, imputation (step 8) left to model judgment, **Python-only** output. |
 | 2 | [data_cleaning_plan_from_code.md](./data_cleaning_plan_from_code.md) | **JSON cleaning plan** schema and rules; the app appends the finalized Python from step 1 after this template is formatted (so braces in code never pass through `str.format`). |
 | Fix | [data_cleaning_fix.md](./data_cleaning_fix.md) | Correct failing cleaner code; the app **re-runs** step 2 on the latest Python after a successful fix. |
 

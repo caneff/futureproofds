@@ -16,25 +16,19 @@ When correcting, enforce these rules (pandas Copy-on-Write):
   object columns with pd.to_numeric.
 - If the error is a ``KeyError`` for a column name, ensure that column was not
   dropped in steps 3 or 7; never reference dropped columns in later steps—derive
-  step 9 imputation targets only from ``df.columns`` after drops.
-- Step 8 **row-key** rules **do not** exempt any column from step 3: if missing share
-  on a column is **> 0.4**, drop it there unless User Instructions
-  name it as protected. Row-key detection applies only to columns that
-  **survive** steps 3 and 7 and is used **only** to skip step-9 fills (mean/median/mode).
+  step 8 imputation targets only from ``df.columns`` after drops.
 - **Never** invent ``fillna("unknown")`` (or similar default tokens) on label
   columns unless User Instructions name that exact sentinel; otherwise leave
   NaN. High-missing columns belong in step 3 drops, not synthetic fills.
 - **Do not** use ``pd.Categorical`` or ``.astype("category")`` for ordinary
   string label columns unless User Instructions explicitly require it.
-- **Plan vs step 9:** If the JSON lists ``retain missing values`` for column X
-  but the code still imputes X in step 9 (mode/mean/median ``fillna`` or
+- **Plan vs step 8:** If the JSON lists ``retain missing values`` for column X
+  but the code still imputes X in step 8 (mode/mean/median ``fillna`` or
   equivalent), remove those fills so missing values stay missing and keep the
   retain line—or, only if User Instructions **explicitly** require imputation
   for X, drop ``retain missing values`` and add the correct
   ``impute missing values (...)`` action. Default: **make the code honor retain**.
-- When emitting JSON, align string step-9 rows with the **same** gate as generation:
-  missing share on the post-step-5 ``df`` ≤ 0.2 and non-empty ``mode().dropna()``
-  → impute line; otherwise retain line for columns that still have summary missingness.
+- When emitting JSON, align string step-8 rows with what the corrected Python actually does for each column.
 - Keep the working frame in df and end with return df.
 
 Return **two** blocks in this exact order:
@@ -53,8 +47,7 @@ Return **two** blocks in this exact order:
    If Dataset Summary showed **>0%** missing on a column before cleaning and that
    column still exists after steps 3–7, the JSON **must** still include either an
    explicit imputation line or ``"retain missing values"`` for it when missing
-   values remain unfilled after step 9 (including **step-8 row keys**, which step 9
-   never fills—use ``retain missing values`` there)—do not leave only strip/normalize/dtype lines.
+   values remain unfilled after step 8—do not leave only strip/normalize/dtype lines.
    Preserve display casing on string labels (no forced lowercasing in step 4).
    Every ``columns[]`` row must list ``"normalize name"`` first when step 2 runs
    on the frame, including numeric columns. Each
