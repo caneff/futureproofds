@@ -4,7 +4,6 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 from data_cleaning_agent.utils import (
-    APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN,
     PythonOutputParser,
     execute_agent_code,
     fix_agent_code,
@@ -95,9 +94,10 @@ class TestFormatDataFrameSummary:
         assert "Rows: 5" in text
         assert "Columns: 6" in text
 
-    def test_renders_id_like_flag_for_user_id(self, summary):
+    def test_formatted_summary_omits_id_like_line(self, summary):
+        """LLM prompt must not include id_like; step 8 uses in-code rules only."""
         text = format_dataframe_summary(summary)
-        assert "id_like: True" in text
+        assert "id_like" not in text
 
     def test_renders_numeric_stats_for_age(self, summary):
         text = format_dataframe_summary(summary)

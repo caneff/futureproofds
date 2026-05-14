@@ -59,9 +59,15 @@ Pipeline (in order):
    dtypes) the stripped string is empty **or** equals a common placeholder token
    (treat the same token list as step 5: ``""``, ``"N/A"``, ``"n/a"``, etc.). If
    missing share **> 0.4**, **drop** that column, EXCEPT columns listed in User
-   Instructions or the synthetic row id column (``__agent_row_id__``) described above. **No column gets a free pass from
-   its name** (including ``*_id`` or ``employee_id``): the rule is missing share
-   only. **Step 8** never overrides this step. Dropping here **immediately after step
+   Instructions or the synthetic row id column (``__agent_row_id__``) described above.
+   Step-3 exemptions are **only** those two cases; do **not** infer exemptions from
+   column names (e.g. ``*_id`` or ``employee_id``) or from treating a column as an
+   “identifier.” Dataset Summary does not flag ID-like columns; step 8 classifies
+   ID-like columns **in code** from the surviving ``df`` after steps 3 and 7. **Wrong:**
+   excluding a column from the step-3 drop list because its name ends with ``_id``.
+   **Right:** drop whenever missing share **> 0.4** unless User Instructions
+   explicitly name that column as protected or the column is ``__agent_row_id__``.
+   **Step 8** never overrides this step. Dropping here **immediately after step
    2** avoids wasted work and wrong imputation paths on columns that are mostly empty.
 4. For object/string columns, **strip leading/trailing whitespace only** on
    cell values. **Do not** apply ``.str.lower()``, ``.str.casefold()``,

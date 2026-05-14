@@ -613,7 +613,9 @@ def format_dataframe_summary(summary: DataFrameSummary) -> str:
     Produces the string interpolated into the ``{all_datasets_summary}`` slot of
     the cleaning prompt. Lines are emitted only when relevant (numeric stats
     only for numeric columns, top categories only when populated, detection only
-    when at least one flag is True).
+    when at least one flag is True). ``ColumnSummary.id_like`` is intentionally
+    omitted from this text so the model does not treat it as a step-3 exemption;
+    step 8 ID-like rules are applied in code from the surviving ``df`` only.
 
     Parameters
     ----------
@@ -650,8 +652,6 @@ def format_dataframe_summary(summary: DataFrameSummary) -> str:
                 f"{c['value']} ({c['pct']:.1f}%)" for c in col.top_categories
             )
             lines.append(f"  top categories: {cats}")
-        if col.id_like:
-            lines.append("  id_like: True")
         if (
             col.looks_date_like
             or col.looks_numeric_string_like
