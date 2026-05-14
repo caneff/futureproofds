@@ -7,7 +7,7 @@ then omit only those operations while keeping the rest of the pipeline coherent,
 A structured cleaning-plan JSON is produced in a **separate** LLM step after yours. This step emits **Python only**—implement the pipeline faithfully in code.
 
 Application synthetic row id (must match the Streamlit app constant ``preview_helpers.AGENT_ROW_ID``, currently ``__agent_row_id__``):
-The column ``__agent_row_id__`` is a synthetic stable row identifier added by the application before cleaning. Do not drop it, rename it, or change its values. Carry it through unchanged for every row that remains in the returned DataFrame so before-and-after rows can be aligned.
+The column ``__agent_row_id__`` is a synthetic stable key added by the application before cleaning. Do not drop it, rename it, or change its values. Carry it through unchanged for every row that remains in the returned DataFrame so before-and-after rows can be aligned.
 
 Hard constraints:
 - Start with: df = source_df.copy(). Never mutate source_df.
@@ -58,16 +58,14 @@ Pipeline (in order):
    fraction of rows where the value is ``pd.NA``/NaN **or** (for object/string
    dtypes) the stripped string is empty **or** equals a common placeholder token
    (treat the same token list as step 5: ``""``, ``"N/A"``, ``"n/a"``, etc.). If
-   missing share **> 0.4**, **drop** that column, EXCEPT columns listed in User
-   Instructions or the synthetic row id column (``__agent_row_id__``) described above.
-   Step-3 exemptions are **only** those two cases; do **not** infer exemptions from
-   column names (e.g. ``*_id`` or ``employee_id``) or from treating a column as an
-   “identifier.” Dataset Summary does not flag row keys; step 8 identifies row
-   keys **in code** from the surviving ``df`` after steps 3 and 7, and **only**
-   to decide step-9 imputation skips (never for drops). **Wrong:**
-   excluding a column from the step-3 drop list because its name ends with ``_id``.
-   **Right:** drop whenever missing share **> 0.4** unless User Instructions
-   explicitly name that column as protected or the column is ``__agent_row_id__``.
+   missing share **> 0.4**, **drop** that column, EXCEPT columns **explicitly** listed in User
+   Instructions as protected from drops. The synthetic row id column
+   (``__agent_row_id__``) is **never** high-missing in normal operation; do **not**
+   add it to step-3 drop-exemption lists (no ``.difference([..., '__agent_row_id__', ...])``).
+   Step-3 exemptions are **only** columns User Instructions name; do **not** infer exemptions from
+   column names or from Dataset Summary. Step 8 applies later using value patterns on the
+   surviving ``df`` after steps 3 and 7, **only** to decide step-9 imputation skips (never for drops).
+   Drop whenever missing share **> 0.4** unless User Instructions explicitly name that column as protected.
    **Step 8** never overrides this step. Dropping here **immediately after step
    2** avoids wasted work and wrong imputation paths on columns that are mostly empty.
 4. For object/string columns, **strip leading/trailing whitespace only** on
@@ -125,10 +123,10 @@ Pipeline (in order):
    is distinct (``df[col].notna().sum() > 0`` and
    ``df[col].nunique(dropna=True) == df[col].notna().sum()``), **or** (b) non-null
    values look like UUIDs, **or** (c) the column is strictly monotonically
-   increasing integers with unique non-null values. **Do not** use column-name
-   substrings (e.g. ``_id``) as sufficient signal. Row keys follow the same steps
+   increasing integers with unique non-null values. **Do not** treat column names
+   alone as sufficient signal; rely on the checks above. Row keys follow the same steps
    4–7 as any other column and **must** still be dropped in step 3 when missing
-   share **> 0.4** (unless User Instructions or ``__agent_row_id__`` exempt them).
+   share **> 0.4** (unless User Instructions exempt them).
    Row keys are **only** exempt from **step 9 fills**: **never** apply mean,
    median, or mode ``fillna`` to a row key—leave any remaining missing values as
    NaN (no invented tokens).

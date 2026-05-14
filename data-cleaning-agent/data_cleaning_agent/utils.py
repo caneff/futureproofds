@@ -18,89 +18,6 @@ logger = logging.getLogger(__name__)
 APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN = "__agent_row_id__"
 
 
-def sanitize_generated_cleaner_drop_exemptions(
-    code: str,
-    user_instructions: str | None,
-) -> str:
-    """
-    Collapse two-literal exemptions that pair the synthetic row id with another name.
-
-    The cleaning LLM often adds extra column names next to ``__agent_row_id__`` in
-    list/set/``pd.Index`` literals used with ``.difference`` (or similar), even when
-    User Instructions do not name those columns as protected. Any second literal
-    whose text is **not** a case-insensitive substring of User Instructions is
-    removed, leaving only ``__agent_row_id__``. Two-literal forms only (typical LLM
-    output); more complex literals are left unchanged.
-    """
-    if not code:
-        return code
-    ui = (user_instructions or "").lower()
-    rid = APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN
-    rid_re = re.escape(rid)
-
-    def _extra_protected(extra: str) -> bool:
-        return extra.lower() in ui
-
-    def _list_rowid_then_extra(m: re.Match) -> str:
-        q, extra = m.group(1), m.group(2)
-        if _extra_protected(extra):
-            return m.group(0)
-        return f"[{q}{rid}{q}]"
-
-    def _list_extra_then_rowid(m: re.Match) -> str:
-        q, extra = m.group(1), m.group(2)
-        if extra == rid or _extra_protected(extra):
-            return m.group(0)
-        return f"[{q}{rid}{q}]"
-
-    def _set_rowid_then_extra(m: re.Match) -> str:
-        q, extra = m.group(1), m.group(2)
-        if _extra_protected(extra):
-            return m.group(0)
-        return "{" + f"{q}{rid}{q}" + "}"
-
-    def _set_extra_then_rowid(m: re.Match) -> str:
-        q, extra = m.group(1), m.group(2)
-        if extra == rid or _extra_protected(extra):
-            return m.group(0)
-        return "{" + f"{q}{rid}{q}" + "}"
-
-    def _pd_rowid_then_extra(m: re.Match) -> str:
-        q, extra = m.group(1), m.group(2)
-        if _extra_protected(extra):
-            return m.group(0)
-        return f"pd.Index([{q}{rid}{q}])"
-
-    def _pd_extra_then_rowid(m: re.Match) -> str:
-        q, extra = m.group(1), m.group(2)
-        if extra == rid or _extra_protected(extra):
-            return m.group(0)
-        return f"pd.Index([{q}{rid}{q}])"
-
-    subs: tuple[tuple[str, Any], ...] = (
-        (rf"\[\s*([\"']){rid_re}\1\s*,\s*\1([^\"']+)\1\s*\]", _list_rowid_then_extra),
-        (rf"\[\s*([\"'])([^\"']+)\1\s*,\s*\1{rid_re}\1\s*\]", _list_extra_then_rowid),
-        (rf"\{{\s*([\"']){rid_re}\1\s*,\s*\1([^\"']+)\1\s*\}}", _set_rowid_then_extra),
-        (rf"\{{\s*([\"'])([^\"']+)\1\s*,\s*\1{rid_re}\1\s*\}}", _set_extra_then_rowid),
-        (
-            rf"pd\.Index\(\[\s*([\"']){rid_re}\1\s*,\s*\1([^\"']+)\1\s*\]\)",
-            _pd_rowid_then_extra,
-        ),
-        (
-            rf"pd\.Index\(\[\s*([\"'])([^\"']+)\1\s*,\s*\1{rid_re}\1\s*\]\)",
-            _pd_extra_then_rowid,
-        ),
-    )
-    out = code
-    for _ in range(8):
-        prev = out
-        for pat, repl in subs:
-            out = re.sub(pat, repl, out)
-        if out == prev:
-            break
-    return out
-
-
 # int()/tolist() when building row-id sets — use a bound tuple so formatters cannot
 # rewrite ``except (TypeError, ValueError)`` into the comma form (wrong semantics).
 _EXC_ROW_ID_SET_COERCION = (TypeError, ValueError)
@@ -871,11 +788,5 @@ def fix_agent_code(
             out["cleaning_plan"] = response["cleaning_plan"]
     else:
         out[code_snippet_key] = response
-
-    _fk = out.get(code_snippet_key)
-    if isinstance(_fk, str):
-        out[code_snippet_key] = sanitize_generated_cleaner_drop_exemptions(
-            _fk, state.get("user_instructions")
-        )
 
     return out

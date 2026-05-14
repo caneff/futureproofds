@@ -20,7 +20,6 @@ from .utils import (
     get_dataframe_summary,
     parse_json_plan_block,
     sanitize_cleaning_plan,
-    sanitize_generated_cleaner_drop_exemptions,
 )
 
 # Setup
@@ -149,7 +148,6 @@ def _run_data_cleaning_generation(
     })
     parser = PythonOutputParser()
     code = parser.parse(_llm_content_str(msg_code))
-    code = sanitize_generated_cleaner_drop_exemptions(code, user_instructions)
 
     plan = _invoke_cleaning_plan_llm(
         model,
