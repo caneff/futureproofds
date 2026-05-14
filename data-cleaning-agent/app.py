@@ -46,13 +46,6 @@ if uploaded_file:
 
     df_uploaded = pd.read_csv(uploaded_file)
 
-    supplemental_instructions = (
-        f'The column "{AGENT_ROW_ID}" is a synthetic stable row identifier '
-        "added by the application before cleaning. Do not drop it, rename it, "
-        "or change its values. Carry it through unchanged for every row that "
-        "remains in the returned DataFrame so before-and-after rows can be aligned."
-    )
-
     st.text_area(
         "Cleaning instructions",
         height=120,
@@ -86,7 +79,6 @@ if uploaded_file:
             agent.generate_cleaning_code(
                 source_df=df_input,
                 user_instructions=user_instructions,
-                supplemental_instructions=supplemental_instructions,
             )
             st.session_state["pending_cleaner_code"] = agent.get_data_cleaner_function()
             st.session_state["pending_cleaning_plan"] = agent.get_cleaning_plan()

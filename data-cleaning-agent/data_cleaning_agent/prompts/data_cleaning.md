@@ -2,7 +2,7 @@ You are a Data Cleaning Agent. Create a {function_name}(source_df) function that
 returns a cleaned pandas DataFrame.
 
 Follow these rules strictly. Do not reorder steps. Do not skip steps **except**
-when **Supplemental instructions** explicitly require omitting a named operation;
+when **User Instructions** explicitly require omitting a named operation;
 then omit only those operations while keeping the rest of the pipeline coherent, and
 make the JSON cleaning plan describe what the code does.
 
@@ -10,7 +10,7 @@ Hard constraints:
 - Start with: df = source_df.copy(). Never mutate source_df.
 - Be deterministic. Do not use randomness. If you must, seed it with 0.
 - Never drop or destructively transform any column named in User Instructions
-  or in Supplemental instructions. Treat those as protected.
+  or the synthetic row id column (``__agent_row_id__``) described above. Treat those as protected.
 - Preserve original column order except for columns that are dropped.
 - Reset the index at the end after any row drops.
 - Never use inplace=True anywhere. Do not pass `inplace=True` to any pandas
@@ -56,7 +56,7 @@ Pipeline (in order):
    dtypes) the stripped string is empty **or** equals a common placeholder token
    (treat the same token list as step 5: ``""``, ``"N/A"``, ``"n/a"``, etc.). If
    missing share **> 0.4**, **drop** that column, EXCEPT columns listed in User
-   Instructions or Supplemental instructions. **No column gets a free pass from
+   Instructions or the synthetic row id column (``__agent_row_id__``) described above. **No column gets a free pass from
    its name** (including ``*_id`` or ``employee_id``): the rule is missing share
    only. **Step 8** never overrides this step. Dropping here **immediately after step
    2** avoids wasted work and wrong imputation paths on columns that are mostly empty.
@@ -135,13 +135,13 @@ Pipeline (in order):
      **not** ``fillna("unknown")`` on label-like fields.
    - **Do not** use ``pd.Categorical``, ``.astype("category")``, rare-frequency
      bucketing, literal ``"other"`` buckets, or companion snapshot columns that
-     duplicate a base column for auditing in this pipeline, unless User or Supplemental
+     duplicate a base column for auditing in this pipeline, unless User
      Instructions **explicitly** require a named feature outside this default—default
      behavior treats enums and labels as plain strings only.
    - **Never** use synthetic string fills on columns that are mostly missing:
      drop them in step 3 when missing share **> 0.4**, or leave remaining NaN
      as-is (no invented tokens).
-   - User or Supplemental Instructions may still require a **named** sentinel they
+   - User Instructions may still require a **named** sentinel they
      spell out for a specific column—then implement that exact string only.
    - Every column your code **actually fills** in this step (mode/mean/median)
      must appear in the cleaning-plan JSON with a matching
@@ -156,9 +156,8 @@ Pipeline (in order):
 User Instructions:
 {user_instructions}
 
-Supplemental instructions (from the application or host; follow these in addition
-to User Instructions above; columns named here are protected the same way):
-{supplemental_instructions}
+Application synthetic row id (must match the Streamlit app constant ``preview_helpers.AGENT_ROW_ID``, currently ``__agent_row_id__``):
+The column ``__agent_row_id__`` is a synthetic stable row identifier added by the application before cleaning. Do not drop it, rename it, or change its values. Carry it through unchanged for every row that remains in the returned DataFrame so before-and-after rows can be aligned.
 
 Dataset Summary:
 {all_datasets_summary}
@@ -243,7 +242,7 @@ Plan JSON rules:
   `"impute missing values (median)"`, `"impute missing values (mean)"`, or
   `"impute missing values (mode)"`. Do **not** use
   `"impute missing values (unknown)"` or other synthetic default labels unless
-  User or Supplemental Instructions explicitly require a **named** sentinel you
+  User Instructions explicitly require a **named** sentinel you
   then implement faithfully. When the code leaves missing values unfilled on
   purpose, use `"retain missing values"` (or a short equivalent) for that column
   instead of inventing imputation. Never skip listing the action when the code

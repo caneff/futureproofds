@@ -18,7 +18,7 @@ When correcting, enforce these rules (pandas Copy-on-Write):
   dropped in steps 3 or 7; never reference dropped columns in later steps—derive
   step 9 imputation targets only from ``df.columns`` after drops.
 - Step 8 ID-like rules **do not** exempt any column from step 3: if missing share
-  on a column is **> 0.4**, drop it there unless User or Supplemental instructions
+  on a column is **> 0.4**, drop it there unless User Instructions
   name it as protected. ID-like classification applies only to columns that
   **survive** steps 3 and 7 and are truly unique row keys.
 - **Never** invent ``fillna("unknown")`` (or similar default tokens) on label

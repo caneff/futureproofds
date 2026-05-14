@@ -112,11 +112,7 @@ agent.invoke_agent(
     user_instructions="Remove columns with more than 30% missing values and standardize date formats",
 )
 
-# Application-injected hints (separate prompt section; same protection rules)
-agent.invoke_agent(
-    source_df=df,
-    supplemental_instructions="Preserve column __agent_row_id__ unchanged.",
-)
+# Synthetic row id rules for alignment are embedded in ``data_cleaning.md``; no separate host prompt slot.
 ```
 
 ## Project Structure

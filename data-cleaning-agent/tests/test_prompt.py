@@ -13,14 +13,12 @@ def test_prompt_renders_with_only_expected_variables():
         template=_DATA_CLEANING_PROMPT_TEMPLATE,
         input_variables=[
             "user_instructions",
-            "supplemental_instructions",
             "all_datasets_summary",
             "function_name",
         ],
     )
     rendered = prompt.format(
         user_instructions="<u>",
-        supplemental_instructions="<sup>",
         all_datasets_summary="<s>",
         function_name="data_cleaner",
     )
@@ -33,7 +31,7 @@ def test_prompt_renders_with_only_expected_variables():
     assert "only numeric" in rendered
     assert "employee_id" in rendered
     assert "<u>" in rendered
-    assert "<sup>" in rendered
+    assert "__agent_row_id__" in rendered
     assert "<s>" in rendered
 
 
@@ -45,7 +43,6 @@ def test_render_check_rejects_unescaped_braces():
         template=bad_template,
         input_variables=[
             "user_instructions",
-            "supplemental_instructions",
             "all_datasets_summary",
             "function_name",
         ],
@@ -53,7 +50,6 @@ def test_render_check_rejects_unescaped_braces():
     with pytest.raises(KeyError, match="col"):
         prompt.format(
             user_instructions="<u>",
-            supplemental_instructions="<sup>",
             all_datasets_summary="<s>",
             function_name="data_cleaner",
         )

@@ -38,7 +38,6 @@ def _data_cleaning_generation_chain(model):
         template=_DATA_CLEANING_PROMPT_TEMPLATE,
         input_variables=[
             "user_instructions",
-            "supplemental_instructions",
             "all_datasets_summary",
             "function_name",
         ],
@@ -50,7 +49,6 @@ def _run_data_cleaning_generation(
     model,
     *,
     user_instructions: str | None,
-    supplemental_instructions: str | None,
     source_df: pd.DataFrame,
     function_name: str,
     log: bool,
@@ -66,8 +64,6 @@ def _run_data_cleaning_generation(
         LangChain chat model.
     user_instructions : str or None
         End-user cleaning instructions.
-    supplemental_instructions : str or None
-        Host-provided instructions.
     source_df : pd.DataFrame
         Data used only for summary statistics in the prompt.
     function_name : str
@@ -90,7 +86,6 @@ def _run_data_cleaning_generation(
     chain = _data_cleaning_generation_chain(model)
     llm_out = chain.invoke({
         "user_instructions": user_instructions or "Follow the basic cleaning steps.",
-        "supplemental_instructions": supplemental_instructions or "(none)",
         "all_datasets_summary": dataset_summary,
         "function_name": function_name,
     })
@@ -117,7 +112,6 @@ def _run_data_cleaning_generation(
 # during the run rather than requiring all keys up front.
 class GraphState(TypedDict, total=False):
     user_instructions: Required[str | None]
-    supplemental_instructions: str | None
     source_df: Required[dict]
     max_retries: Required[int]
     retry_count: Required[int]
@@ -187,7 +181,6 @@ class LightweightDataCleaningAgent:
         self,
         source_df: pd.DataFrame,
         user_instructions: str | None = None,
-        supplemental_instructions: str | None = None,
         max_retries: int = 3,
         retry_count: int = 0,
         config: RunnableConfig | None = None,
@@ -204,11 +197,6 @@ class LightweightDataCleaningAgent:
             here are treated as protected and exempt from drops and destructive
             transforms. When None, the agent applies its full default pipeline.
             The pipeline is defined in ``data_cleaning_agent/prompts/data_cleaning.md``.
-        supplemental_instructions : str, optional
-            Additional instructions injected by the application (for example
-            stable row identifiers). Shown to the model in a separate prompt
-            section from ``user_instructions``; columns named here are protected
-            the same way as in User Instructions.
         max_retries : int, default=3
             Maximum number of retry attempts if generated code fails.
         retry_count : int, default=0
@@ -224,7 +212,6 @@ class LightweightDataCleaningAgent:
         """
         initial_state: GraphState = {
             "user_instructions": user_instructions,
-            "supplemental_instructions": supplemental_instructions,
             "source_df": source_df.to_dict(),
             "max_retries": max_retries,
             "retry_count": retry_count,
@@ -266,7 +253,6 @@ class LightweightDataCleaningAgent:
         self,
         source_df: pd.DataFrame,
         user_instructions: str | None = None,
-        supplemental_instructions: str | None = None,
     ) -> None:
         """
         Run the LLM once to produce cleaning code and a structured plan (no execution).
@@ -280,7 +266,6 @@ class LightweightDataCleaningAgent:
         gen = _run_data_cleaning_generation(
             self.model,
             user_instructions=user_instructions,
-            supplemental_instructions=supplemental_instructions,
             source_df=source_df,
             function_name=self.function_name,
             log=self.log,
@@ -382,7 +367,6 @@ def make_lightweight_data_cleaning_agent(
         return _run_data_cleaning_generation(
             model,
             user_instructions=state.get("user_instructions"),
-            supplemental_instructions=state.get("supplemental_instructions"),
             source_df=df,
             function_name=function_name,
             log=log,
