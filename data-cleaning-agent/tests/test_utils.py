@@ -10,6 +10,7 @@ from data_cleaning_agent.utils import (
     fix_agent_code,
     format_dataframe_summary,
     get_dataframe_summary,
+    run_cleaner_code_on_dataframe,
 )
 
 
@@ -263,3 +264,20 @@ class TestFixAgentCode:
         )
 
         assert out["attempts"] == 3
+
+
+def test_run_cleaner_code_on_dataframe_syntax_error_returns_tuple() -> None:
+    df = pd.DataFrame({"a": [1]})
+    bad = "this is not valid python syntax {{{"
+    out_df, err = run_cleaner_code_on_dataframe(bad, df, function_name="data_cleaner")
+    assert out_df is None
+    assert err is not None
+
+
+def test_run_cleaner_code_on_dataframe_missing_function_returns_tuple() -> None:
+    df = pd.DataFrame({"a": [1]})
+    code = "def other_fn(df):\n    return df\n"
+    out_df, err = run_cleaner_code_on_dataframe(code, df, function_name="data_cleaner")
+    assert out_df is None
+    assert err is not None
+    assert "data_cleaner" in err or "not found" in err.lower()

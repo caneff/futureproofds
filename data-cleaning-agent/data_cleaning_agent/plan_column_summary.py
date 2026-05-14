@@ -22,7 +22,7 @@ def plan_columns_to_summary_rows(plan: dict[str, Any] | None) -> list[dict[str, 
     Returns
     -------
     list[dict[str, str]]
-        Stable column order from merged keys (sorted by column name for determinism).
+        Column order follows the merged plan (coercion + first-seen column order).
     """
     if not plan or not isinstance(plan, dict):
         return []
@@ -30,8 +30,7 @@ def plan_columns_to_summary_rows(plan: dict[str, Any] | None) -> list[dict[str, 
     rows = coerce_cleaning_plan_columns(raw_cols)
     merged = merged_plan_actions_by_column(rows)
     out: list[dict[str, str]] = []
-    for name in sorted(merged.keys()):
-        acts = merged[name]
+    for name, acts in merged.items():
         text = "; ".join(acts) if acts else ""
         out.append({"column": name, "actions": text})
     return out

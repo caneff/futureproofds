@@ -237,20 +237,25 @@ def run_cleaner_code_on_dataframe(
     -------
     tuple
         ``(cleaned_df, None)`` on success, or ``(None, error_message)`` on failure.
+        Never raises: ``exec``/syntax errors and missing cleaner functions are
+        returned as ``(None, message)``.
     """
     state = {
         "source_df": df.to_dict(),
         "data_cleaner_function": code,
         "data_cleaner_function_name": function_name,
     }
-    out = execute_agent_code(
-        state=state,
-        data_key="source_df",
-        result_key="data_cleaned",
-        error_key="data_cleaner_error",
-        code_snippet_key="data_cleaner_function",
-        agent_function_name=function_name,
-    )
+    try:
+        out = execute_agent_code(
+            state=state,
+            data_key="source_df",
+            result_key="data_cleaned",
+            error_key="data_cleaner_error",
+            code_snippet_key="data_cleaner_function",
+            agent_function_name=function_name,
+        )
+    except Exception as exc:
+        return None, str(exc)
     err = out.get("data_cleaner_error")
     if err:
         return None, str(err)

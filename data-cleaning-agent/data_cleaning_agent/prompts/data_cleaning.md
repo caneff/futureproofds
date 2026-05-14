@@ -265,15 +265,6 @@ Plan JSON rules:
   fill that column—no `fillna`, mode/mean/median fill, `bfill`/`ffill`, or `replace`
   that reduces nulls on it. The Python must match the JSON; do not list retain and
   then impute in code.
-- **Self-check before emitting JSON**: trace every `fillna` (and any NA-fill via
-  `where`, `replace`, or mode/mean/median used as a fill) in your function; each
-  target column must have the matching imputation phrase under `columns[].actions`.
-- The application compares **aligned** missing-value counts to the plan; if nulls
-  decrease on a column without any imputation-classified `actions` entry for that
-  column, the user sees a **warning**—treat that as a failed self-check and revise.
-  **Supplemental instructions** may repeat a host list of columns with upload-time
-  missingness: you **must** satisfy that list with matching `actions` (impute or
-  retain) for every listed column your pipeline still processes after drops.
 - `actions` is an array of short human-readable strings in **rough pipeline
   order** for that column (what happens to that column, step by step).
 - If no column-specific work: `"columns": []` and use `row_ops` / `notes`.
