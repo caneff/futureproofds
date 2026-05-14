@@ -38,7 +38,7 @@ _BOOL_LIKE_TOKENS = frozenset({
 
 def normalize_cleaning_column_name(name: str) -> str:
     """
-    Match pipeline step 2 in ``prompts/data_cleaning.md``: lowercase, strip,
+    Match pipeline step 2 in ``prompts/data_cleaning_code_only.md``: lowercase, strip,
     replace non-alphanumeric runs with a single underscore.
     """
     s = str(name).strip().lower()

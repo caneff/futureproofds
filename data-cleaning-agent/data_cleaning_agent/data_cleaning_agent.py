@@ -28,9 +28,6 @@ AGENT_NAME = "lightweight_data_cleaning_agent"
 LOG_PATH = os.path.join(os.getcwd(), "logs/")
 
 
-_PROMPT_PATH = Path(__file__).parent / "prompts" / "data_cleaning.md"
-_DATA_CLEANING_PROMPT_TEMPLATE = _PROMPT_PATH.read_text(encoding="utf-8")
-
 _CODE_ONLY_PATH = Path(__file__).parent / "prompts" / "data_cleaning_code_only.md"
 _CODE_ONLY_PROMPT_TEMPLATE = _CODE_ONLY_PATH.read_text(encoding="utf-8")
 
@@ -95,19 +92,6 @@ def _invoke_cleaning_plan_llm(
     if source_df is not None:
         return sanitize_cleaning_plan(raw_plan, source_df)
     return raw_plan
-
-
-def _data_cleaning_generation_chain(model):
-    """Legacy: single prompt with dual-output parser (unused by default path)."""
-    data_cleaning_prompt = PromptTemplate(
-        template=_DATA_CLEANING_PROMPT_TEMPLATE,
-        input_variables=[
-            "user_instructions",
-            "all_datasets_summary",
-            "function_name",
-        ],
-    )
-    return data_cleaning_prompt | model | DataCleaningOutputParser()
 
 
 def _run_data_cleaning_generation(
@@ -212,6 +196,11 @@ class LightweightDataCleaningAgent:
     Uses an LLM to create data cleaning functions based on user instructions. The agent
     automatically retries with error correction if the generated code fails.
 
+    Prompt sources: ``data_cleaning_code_only.md`` (Python generation),
+    ``data_cleaning_plan_from_code.md`` (JSON plan from finalized code),
+    ``data_cleaning_fix.md`` (error correction). See ``data_cleaning.md`` in the
+    same directory for a short index linking these files.
+
     Parameters
     ----------
     model : LLM
@@ -278,7 +267,10 @@ class LightweightDataCleaningAgent:
             Free-form cleaning instructions from the end user. Columns named
             here are treated as protected and exempt from drops and destructive
             transforms. When None, the agent applies its full default pipeline.
-            The pipeline is defined in ``data_cleaning_agent/prompts/data_cleaning.md``.
+            The default pipeline text lives in
+            ``data_cleaning_agent/prompts/data_cleaning_code_only.md``; the JSON
+            plan is produced from ``data_cleaning_plan_from_code.md``. See
+            ``data_cleaning.md`` in the same folder for an index of prompt files.
         max_retries : int, default=3
             Maximum number of retry attempts if generated code fails.
         retry_count : int, default=0

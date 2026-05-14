@@ -1,10 +1,29 @@
 import pytest
+from pathlib import Path
+
 from data_cleaning_agent.data_cleaning_agent import (
     _CODE_ONLY_PROMPT_TEMPLATE,
     _FIX_DATA_CLEANER_PROMPT_TEMPLATE,
     _PLAN_FROM_CODE_PROMPT_TEMPLATE,
 )
 from langchain_core.prompts import PromptTemplate
+
+_DATA_CLEANING_INDEX = (
+    Path(__file__).resolve().parent.parent
+    / "data_cleaning_agent"
+    / "prompts"
+    / "data_cleaning.md"
+)
+
+
+@pytest.mark.unit
+def test_data_cleaning_md_is_index_linking_runtime_prompts():
+    """data_cleaning.md must stay a non-template index (single source of truth story)."""
+    text = _DATA_CLEANING_INDEX.read_text(encoding="utf-8")
+    assert "./data_cleaning_code_only.md" in text
+    assert "./data_cleaning_plan_from_code.md" in text
+    assert "./data_cleaning_fix.md" in text
+    assert "{user_instructions}" not in text
 
 
 @pytest.mark.unit

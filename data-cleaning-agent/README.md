@@ -112,7 +112,7 @@ agent.invoke_agent(
     user_instructions="Remove columns with more than 30% missing values and standardize date formats",
 )
 
-# Synthetic row id rules for alignment are embedded in ``data_cleaning.md``; no separate host prompt slot.
+# Synthetic row id rules for alignment are in ``data_cleaning_code_only.md``; no separate host prompt slot.
 ```
 
 ## Project Structure
@@ -123,7 +123,7 @@ data-cleaning-agent/
 │   ├── __init__.py
 │   ├── data_cleaning_agent.py  # Main agent class
 │   ├── prompts/
-│   │   ├── data_cleaning.md                 # Full pipeline spec (reference)
+│   │   ├── data_cleaning.md                 # Index: links to runtime prompt files
 │   │   ├── data_cleaning_code_only.md       # First LLM call: Python only
 │   │   ├── data_cleaning_plan_from_code.md  # Second LLM call: JSON plan from code
 │   │   └── data_cleaning_fix.md             # Error-correction prompt
@@ -136,7 +136,8 @@ Generation uses **two** LLM round-trips: code from `data_cleaning_code_only.md`,
 
 The default 14-step pipeline that runs when no `user_instructions` are
 provided is defined in
+[`data_cleaning_agent/prompts/data_cleaning_code_only.md`](data_cleaning_agent/prompts/data_cleaning_code_only.md).
 [`data_cleaning_agent/prompts/data_cleaning.md`](data_cleaning_agent/prompts/data_cleaning.md)
-and mirrored in the code-only prompt.
+is an **index only** (links to code-only, plan-from-code, and fix prompts).
 
 Dependencies and the lockfile live at the repo root (`pyproject.toml` and `uv.lock`).
