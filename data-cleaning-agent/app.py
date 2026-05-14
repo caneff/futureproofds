@@ -59,15 +59,17 @@ if uploaded_file:
 
     df_uploaded = pd.read_csv(uploaded_file)
 
-    st.text_area(
-        "Cleaning instructions",
-        height=120,
-        key="cleaning_user_instructions",
-        help=(
-            "Describe how you want the data cleaned. Edit these instructions and "
-            "click Generate again for new cleaning code."
-        ),
-    )
+    with st.expander("Cleaning instructions", expanded=False):
+        st.text_area(
+            "cleaning_instructions_editor",
+            height=120,
+            key="cleaning_user_instructions",
+            label_visibility="collapsed",
+            placeholder="Optional. Describe how you want the data cleaned.",
+            help=(
+                "Edit these instructions and click Generate again for new cleaning code."
+            ),
+        )
 
     gen_label = (
         "Generate cleaning code"
