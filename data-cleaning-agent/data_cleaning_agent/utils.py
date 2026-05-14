@@ -389,10 +389,38 @@ class PythonOutputParser(BaseOutputParser):
 
     def parse(self, text: str):
         """Extract code from ```python``` blocks or return text as-is."""
-        python_code_match = re.search(r"```python(.*?)```", text, re.DOTALL)
+        python_code_match = re.search(
+            r"```python(.*?)```", text, re.DOTALL | re.IGNORECASE
+        )
         if python_code_match:
             return python_code_match.group(1).strip()
         return text
+
+
+def parse_json_plan_block(text: str) -> dict[str, Any] | None:
+    """
+    Extract and parse the first ```json``` object from ``text``.
+
+    Returns
+    -------
+    dict or None
+        Parsed JSON object, or ``None`` if missing or invalid.
+    """
+    json_match = re.search(r"```json(.*?)```", text, re.DOTALL | re.IGNORECASE)
+    if not json_match:
+        return None
+    raw_json = json_match.group(1).strip()
+    try:
+        loaded = json.loads(raw_json)
+    except json.JSONDecodeError:
+        logger.warning(
+            "Invalid JSON in cleaning plan block; treating plan as None."
+        )
+        return None
+    if not isinstance(loaded, dict):
+        logger.warning("Cleaning plan JSON was not an object; treating plan as None.")
+        return None
+    return loaded
 
 
 class DataCleaningOutputParser(BaseOutputParser):
@@ -419,22 +447,7 @@ class DataCleaningOutputParser(BaseOutputParser):
         else:
             code = text.strip()
 
-        json_match = re.search(r"```json(.*?)```", text, re.DOTALL | re.IGNORECASE)
-        plan: dict[str, Any] | None = None
-        if json_match:
-            raw_json = json_match.group(1).strip()
-            try:
-                loaded = json.loads(raw_json)
-            except json.JSONDecodeError:
-                logger.warning(
-                    "Invalid JSON in cleaning plan block; treating plan as None."
-                )
-            else:
-                plan = loaded if isinstance(loaded, dict) else None
-                if loaded is not None and not isinstance(loaded, dict):
-                    logger.warning(
-                        "Cleaning plan JSON was not an object; treating plan as None."
-                    )
+        plan: dict[str, Any] | None = parse_json_plan_block(text)
 
         return {"code": code, "cleaning_plan": plan}
 

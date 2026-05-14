@@ -2,9 +2,10 @@
 import logging
 import os
 from pathlib import Path
-from typing import Required, TypedDict
+from typing import Any, Required, TypedDict
 
 import pandas as pd
+from langchain_core.messages import HumanMessage
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
@@ -12,10 +13,12 @@ from langgraph.types import Checkpointer
 
 from .utils import (
     DataCleaningOutputParser,
+    PythonOutputParser,
     execute_agent_code,
     fix_agent_code,
     format_dataframe_summary,
     get_dataframe_summary,
+    parse_json_plan_block,
     sanitize_cleaning_plan,
 )
 
@@ -28,12 +31,74 @@ LOG_PATH = os.path.join(os.getcwd(), "logs/")
 _PROMPT_PATH = Path(__file__).parent / "prompts" / "data_cleaning.md"
 _DATA_CLEANING_PROMPT_TEMPLATE = _PROMPT_PATH.read_text(encoding="utf-8")
 
+_CODE_ONLY_PATH = Path(__file__).parent / "prompts" / "data_cleaning_code_only.md"
+_CODE_ONLY_PROMPT_TEMPLATE = _CODE_ONLY_PATH.read_text(encoding="utf-8")
+
+_PLAN_FROM_CODE_PATH = Path(__file__).parent / "prompts" / "data_cleaning_plan_from_code.md"
+_PLAN_FROM_CODE_PROMPT_TEMPLATE = _PLAN_FROM_CODE_PATH.read_text(encoding="utf-8")
+
 _FIX_PROMPT_PATH = Path(__file__).parent / "prompts" / "data_cleaning_fix.md"
 _FIX_DATA_CLEANER_PROMPT_TEMPLATE = _FIX_PROMPT_PATH.read_text(encoding="utf-8")
 
 
+def _llm_content_str(msg: Any) -> str:
+    """Normalize LangChain chat model output to plain text."""
+    content = getattr(msg, "content", msg)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text", "")))
+            else:
+                parts.append(str(block))
+        return "".join(parts)
+    return str(content)
+
+
+def _invoke_cleaning_plan_llm(
+    model: Any,
+    *,
+    user_instructions: str,
+    all_datasets_summary: str,
+    function_name: str,
+    generated_python_code: str,
+    source_df: pd.DataFrame | None,
+) -> dict | None:
+    """
+    Second LLM call: emit cleaning-plan JSON conditioned on finalized Python.
+
+    The prompt body is formatted first; the Python source is appended without
+    templating so arbitrary ``{{`` in code cannot break ``str.format``.
+    """
+    base = _PLAN_FROM_CODE_PROMPT_TEMPLATE.format(
+        user_instructions=user_instructions,
+        all_datasets_summary=all_datasets_summary,
+        function_name=function_name,
+    )
+    full_prompt = (
+        base
+        + "\n\n## Authoritative Python (read completely before writing JSON)\n\n"
+        "```python\n"
+        + generated_python_code
+        + "\n```\n"
+    )
+    try:
+        msg = model.invoke([HumanMessage(content=full_prompt)])
+    except Exception:
+        logger.exception("Cleaning plan LLM invoke failed.")
+        return None
+    raw_plan = parse_json_plan_block(_llm_content_str(msg))
+    if raw_plan is None:
+        return None
+    if source_df is not None:
+        return sanitize_cleaning_plan(raw_plan, source_df)
+    return raw_plan
+
+
 def _data_cleaning_generation_chain(model):
-    """Prompt | LLM | dual-output parser for create/regenerate flows."""
+    """Legacy: single prompt with dual-output parser (unused by default path)."""
     data_cleaning_prompt = PromptTemplate(
         template=_DATA_CLEANING_PROMPT_TEMPLATE,
         input_variables=[
@@ -56,7 +121,7 @@ def _run_data_cleaning_generation(
     file_name: str,
 ) -> dict:
     """
-    Invoke the cleaning LLM once and return graph-shaped keys for code + plan.
+    Invoke the cleaning LLM twice: Python only, then plan JSON from frozen code.
 
     Parameters
     ----------
@@ -83,16 +148,33 @@ def _run_data_cleaning_generation(
     """
     summary = get_dataframe_summary(source_df)
     dataset_summary = format_dataframe_summary(summary)
-    chain = _data_cleaning_generation_chain(model)
-    llm_out = chain.invoke({
-        "user_instructions": user_instructions or "Follow the basic cleaning steps.",
+    ui = user_instructions or "Follow the basic cleaning steps."
+
+    code_prompt = PromptTemplate(
+        template=_CODE_ONLY_PROMPT_TEMPLATE,
+        input_variables=[
+            "user_instructions",
+            "all_datasets_summary",
+            "function_name",
+        ],
+    )
+    msg_code = (code_prompt | model).invoke({
+        "user_instructions": ui,
         "all_datasets_summary": dataset_summary,
         "function_name": function_name,
     })
-    code = llm_out["code"]
-    plan = llm_out["cleaning_plan"]
-    if plan is not None:
-        plan = sanitize_cleaning_plan(plan, source_df)
+    parser = PythonOutputParser()
+    code = parser.parse(_llm_content_str(msg_code))
+
+    plan = _invoke_cleaning_plan_llm(
+        model,
+        user_instructions=ui,
+        all_datasets_summary=dataset_summary,
+        function_name=function_name,
+        generated_python_code=code,
+        source_df=source_df,
+    )
+
     file_path = None
     if log:
         file_path = os.path.join(log_dir, file_name)
@@ -401,7 +483,22 @@ def make_lightweight_data_cleaning_agent(
             output_parser=DataCleaningOutputParser(),
         )
         raw = state.get("source_df")
-        if out.get("cleaning_plan") is not None and raw is not None:
+        code = out.get("data_cleaner_function")
+        if code and raw is not None:
+            df = pd.DataFrame.from_dict(raw)
+            summary = format_dataframe_summary(get_dataframe_summary(df))
+            ui = state.get("user_instructions") or "Follow the basic cleaning steps."
+            fn = state.get("data_cleaner_function_name") or function_name
+            plan = _invoke_cleaning_plan_llm(
+                model,
+                user_instructions=ui,
+                all_datasets_summary=summary,
+                function_name=fn,
+                generated_python_code=code,
+                source_df=df,
+            )
+            out = {**out, "cleaning_plan": plan}
+        elif out.get("cleaning_plan") is not None and raw is not None:
             out = {
                 **out,
                 "cleaning_plan": sanitize_cleaning_plan(

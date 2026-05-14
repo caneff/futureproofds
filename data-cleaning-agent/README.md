@@ -123,14 +123,20 @@ data-cleaning-agent/
 │   ├── __init__.py
 │   ├── data_cleaning_agent.py  # Main agent class
 │   ├── prompts/
-│   │   └── data_cleaning.md    # LLM prompt + default cleaning pipeline
+│   │   ├── data_cleaning.md                 # Full pipeline spec (reference)
+│   │   ├── data_cleaning_code_only.md       # First LLM call: Python only
+│   │   ├── data_cleaning_plan_from_code.md  # Second LLM call: JSON plan from code
+│   │   └── data_cleaning_fix.md             # Error-correction prompt
 │   └── utils.py                # Utility functions
 ├── app.py                      # Streamlit interface
 └── README.md
 ```
 
+Generation uses **two** LLM round-trips: code from `data_cleaning_code_only.md`, then a cleaning plan from `data_cleaning_plan_from_code.md` conditioned on that code (after fixes, the plan step runs again on the latest Python).
+
 The default 14-step pipeline that runs when no `user_instructions` are
 provided is defined in
-[`data_cleaning_agent/prompts/data_cleaning.md`](data_cleaning_agent/prompts/data_cleaning.md).
+[`data_cleaning_agent/prompts/data_cleaning.md`](data_cleaning_agent/prompts/data_cleaning.md)
+and mirrored in the code-only prompt.
 
 Dependencies and the lockfile live at the repo root (`pyproject.toml` and `uv.lock`).

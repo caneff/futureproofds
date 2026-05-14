@@ -26,6 +26,15 @@ When correcting, enforce these rules (pandas Copy-on-Write):
   NaN. High-missing columns belong in step 3 drops, not synthetic fills.
 - **Do not** use ``pd.Categorical`` or ``.astype("category")`` for ordinary
   string label columns unless User Instructions explicitly require it.
+- **Plan vs step 9:** If the JSON lists ``retain missing values`` for column X
+  but the code still imputes X in step 9 (mode/mean/median ``fillna`` or
+  equivalent), remove those fills so missing values stay missing and keep the
+  retain line—or, only if User Instructions **explicitly** require imputation
+  for X, drop ``retain missing values`` and add the correct
+  ``impute missing values (...)`` action. Default: **make the code honor retain**.
+- When emitting JSON, align string step-9 rows with the **same** gate as generation:
+  missing share on the post-step-5 ``df`` ≤ 0.2 and non-empty ``mode().dropna()``
+  → impute line; otherwise retain line for columns that still have summary missingness.
 - Keep the working frame in df and end with return df.
 
 Return **two** blocks in this exact order:
