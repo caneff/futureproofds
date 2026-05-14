@@ -1,4 +1,4 @@
-"""Tests for row-effect helpers used with cleaning plans."""
+"""Tests for row-effect helpers used with cleaning previews."""
 
 import pandas as pd
 import pytest

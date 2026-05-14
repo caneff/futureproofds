@@ -8,8 +8,7 @@ from data_cleaning_agent.cleaning_outcome_summary import (
     format_outcome_summary_markdown,
     outcome_facts_show_any_change,
 )
-from data_cleaning_agent.plan_column_summary import plan_columns_to_summary_rows
-from data_cleaning_agent.utils import run_cleaner_code_on_dataframe, sanitize_cleaning_plan
+from data_cleaning_agent.utils import run_cleaner_code_on_dataframe
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from preview_helpers import (
@@ -37,7 +36,6 @@ if uploaded_file:
             "preview_df_input",
             "preview_df_cleaned",
             "pending_cleaner_code",
-            "pending_cleaning_plan",
             "pending_function_name",
             "cleaning_user_instructions",
         ):
@@ -52,18 +50,18 @@ if uploaded_file:
         key="cleaning_user_instructions",
         help=(
             "Describe how you want the data cleaned. Edit these instructions and "
-            "click Generate again for a new plan and code."
+            "click Generate again for new cleaning code."
         ),
     )
 
     gen_label = (
-        "Generate cleaning plan"
+        "Generate cleaning code"
         if not st.session_state.get("pending_cleaner_code")
         else "Generate again"
     )
 
     if st.button(gen_label):
-        with st.spinner("Generating plan and code..."):
+        with st.spinner("Generating code..."):
             llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
             agent = LightweightDataCleaningAgent(model=llm, log=True)
             df_input = df_uploaded.copy()
@@ -72,16 +70,13 @@ if uploaded_file:
             )
             raw_ui = st.session_state.get("cleaning_user_instructions")
             user_instructions = (
-                raw_ui.strip()
-                if isinstance(raw_ui, str) and raw_ui.strip()
-                else None
+                raw_ui.strip() if isinstance(raw_ui, str) and raw_ui.strip() else None
             )
             agent.generate_cleaning_code(
                 source_df=df_input,
                 user_instructions=user_instructions,
             )
             st.session_state["pending_cleaner_code"] = agent.get_data_cleaner_function()
-            st.session_state["pending_cleaning_plan"] = agent.get_cleaning_plan()
             st.session_state["pending_function_name"] = (
                 agent.response.get("data_cleaner_function_name")
                 if agent.response
@@ -89,58 +84,14 @@ if uploaded_file:
             )
             st.session_state["preview_df_input"] = df_input
             st.session_state.pop("preview_df_cleaned", None)
-        st.success(
-            "Plan generated. Review the summary and code below, then apply when ready."
-        )
+        st.success("Cleaning code generated. Review it below, then apply when ready.")
 
     pending_code = st.session_state.get("pending_cleaner_code")
-    pending_plan = st.session_state.get("pending_cleaning_plan")
     df_input_stored = st.session_state.get("preview_df_input")
 
-    if pending_plan is not None and df_input_stored is not None:
-        resanitized = sanitize_cleaning_plan(pending_plan, df_input_stored)
-        if resanitized is not None:
-            st.session_state["pending_cleaning_plan"] = resanitized
-            pending_plan = resanitized
-
     if pending_code and df_input_stored is not None:
-        if pending_plan is None:
-            st.subheader("Cleaning plan")
-            st.warning(
-                "Structured plan JSON was missing or invalid. You can still run "
-                "cleaning with Apply below—review the generated code first."
-            )
-        else:
-            cols = pending_plan.get("columns")
-            notes = pending_plan.get("notes") or ""
-            with st.expander(
-                "Cleaning plan (read-only)", expanded=False, key="cleaning_plan_main"
-            ):
-                if isinstance(cols, list):
-                    summary_rows = plan_columns_to_summary_rows(pending_plan)
-                    if summary_rows:
-                        st.dataframe(
-                            pd.DataFrame(summary_rows),
-                            width="stretch",
-                            hide_index=True,
-                        )
-                    else:
-                        st.caption("No per-column entries (columns list empty).")
-                else:
-                    st.dataframe(
-                        pd.DataFrame(cols) if cols is not None else pd.DataFrame(),
-                        width="stretch",
-                        hide_index=True,
-                    )
-                    st.caption(
-                        "Expected a list-shaped ``columns`` plan for the step summary."
-                    )
-                if notes:
-                    st.markdown("**Notes**")
-                    st.write(notes)
-
-        with st.expander("Generated cleaning code", expanded=False):
-            st.code(pending_code, language="python")
+        st.subheader("Generated cleaning code")
+        st.code(pending_code, language="python")
 
         if st.button("Apply Cleaning"):
             apply_err: str | None = None
@@ -170,7 +121,7 @@ if uploaded_file:
     if "preview_df_input" in st.session_state:
         st.subheader("Cleaned Data")
         if df_cleaned_stored is None:
-            st.info("Generate a plan and apply cleaning to see results here.")
+            st.info("Generate cleaning code and apply to see results here.")
             st.download_button(
                 "Download Cleaned Data",
                 data="",
@@ -196,7 +147,7 @@ if uploaded_file:
             else:
                 try:
                     cur = int(st.session_state[_preview_k_state])
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     cur = default_k
                 st.session_state[_preview_k_state] = min(max(cur, 1), max_k)
             k_preview = st.slider(

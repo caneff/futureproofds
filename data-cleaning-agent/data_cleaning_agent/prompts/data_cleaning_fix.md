@@ -22,45 +22,9 @@ When correcting, enforce these rules (pandas Copy-on-Write):
   NaN. High-missing columns belong in step 3 drops, not synthetic fills.
 - **Do not** use ``pd.Categorical`` or ``.astype("category")`` for ordinary
   string label columns unless User Instructions explicitly require it.
-- **Plan vs step 8:** If the JSON lists ``retain missing values`` for column X
-  but the code still imputes X in step 8 (mode/mean/median ``fillna`` or
-  equivalent), remove those fills so missing values stay missing and keep the
-  retain line—or, only if User Instructions **explicitly** require imputation
-  for X, drop ``retain missing values`` and add the correct
-  ``impute missing values (...)`` action. Default: **make the code honor retain**.
-- When emitting JSON, align string step-8 rows with what the corrected Python actually does for each column.
 - Keep the working frame in df and end with return df.
 
-Return **two** blocks in this exact order:
-1) ```python``` with the full corrected function definition for {function_name}.
-2) ```json``` describing what the corrected code does, with keys "columns"
-   (array of objects each with "name" and "actions"), "row_ops" (array of
-   strings), and "notes" (string), matching the generation contract. The JSON
-   must be **complete**: include every column the code still changes and every
-   action (including imputation with mean/median/mode as applicable);
-   do not omit imputation or other steps that remain in the code. If the fixed
-   code imputes a string/object column such as ``city``, the JSON must list that
-   imputation explicitly (e.g. ``"impute missing values (mode)"``), not only
-   strip steps.
-   If the code leaves missing values unfilled on purpose, list
-   ``"retain missing values"`` (or equivalent)—do not claim ``"impute missing values (unknown)"``.
-   If Dataset Summary showed **>0%** missing on a column before cleaning and that
-   column still exists after steps 3–7, the JSON **must** still include either an
-   explicit imputation line or ``"retain missing values"`` for it when missing
-   values remain unfilled after step 8—do not leave only strip/normalize/dtype lines.
-   Preserve display casing on string labels (no forced lowercasing in step 4).
-   Every ``columns[]`` row must list ``"normalize name"`` first when step 2 runs
-   on the frame, including numeric columns. Each
-   `row_ops` string must include the exact integer rows removed for that step,
-   e.g. `"drop all-null rows (3 rows removed)"`. Each
-   `columns[].name` must exist in the original Dataset Summary (after the same
-   name normalization as the code) or be a column the code truly creates; never
-   invent column names. Any column the code **drops** must
-   still appear under `columns` with only early steps (2 plus 4–6 when applicable)
-   that actually run
-   on it, plus a final explicit `"drop column (<reason>)"` (e.g. high missing %,
-   constant, all null); do not list imputation for columns
-   dropped before that stage.
+Return **only** one fenced ```python``` block with the full corrected function definition for {function_name} (no preamble, no JSON, no trailing commentary).
 
 Broken code:
 {code_snippet}

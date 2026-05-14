@@ -287,18 +287,3 @@ def test_run_cleaner_code_on_dataframe_missing_function_returns_tuple() -> None:
     assert out_df is None
     assert err is not None
     assert "data_cleaner" in err or "not found" in err.lower()
-
-
-def test_parse_json_plan_block_extracts_object() -> None:
-    from data_cleaning_agent.utils import parse_json_plan_block
-
-    text = 'Preamble\n```json\n{"columns": [], "row_ops": [], "notes": ""}\n```\n'
-    out = parse_json_plan_block(text)
-    assert out == {"columns": [], "row_ops": [], "notes": ""}
-
-
-def test_parse_json_plan_block_invalid_returns_none() -> None:
-    from data_cleaning_agent.utils import parse_json_plan_block
-
-    assert parse_json_plan_block("no json here") is None
-    assert parse_json_plan_block("```json\nnot json\n```") is None

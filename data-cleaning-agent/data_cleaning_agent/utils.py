@@ -1,6 +1,5 @@
 # Utility functions for lightweight data cleaning agent
 
-import json
 import logging
 import re
 from dataclasses import dataclass
@@ -14,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 
 # Synthetic stable row id injected by the Streamlit app (see ``preview_helpers.AGENT_ROW_ID``).
-# Keep identical; omit from user-facing cleaning plans.
 APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN = "__agent_row_id__"
 
 
@@ -36,185 +34,6 @@ _BOOL_LIKE_TOKENS = frozenset({
     "0",
     "1",
 })
-
-
-def normalize_cleaning_column_name(name: str) -> str:
-    """
-    Match pipeline step 2 in ``prompts/data_cleaning_code_only.md``: lowercase, strip,
-    replace non-alphanumeric runs with a single underscore.
-    """
-    s = str(name).strip().lower()
-    s = re.sub(r"[^a-z0-9]+", "_", s)
-    s = re.sub(r"_+", "_", s).strip("_")
-    return s
-
-
-def _coerce_plan_columns_to_rows(columns: Any) -> list[dict[str, Any]]:
-    """
-    Normalize ``plan['columns']`` to a list of dict rows for sanitization.
-
-    The LLM sometimes emits a JSON object mapping column name -> actions instead
-    of an array of ``{ "name", "actions" }`` objects; that path must still be filtered.
-    """
-    if isinstance(columns, list):
-        return [r for r in columns if isinstance(r, dict)]
-    if isinstance(columns, dict):
-        rows: list[dict[str, Any]] = []
-        for key, val in columns.items():
-            if key is None:
-                continue
-            k = str(key).strip()
-            if not k:
-                continue
-            if isinstance(val, list):
-                actions = [str(x) for x in val]
-            elif val is None:
-                actions = []
-            else:
-                actions = [str(val)]
-            rows.append({"name": k, "actions": actions})
-        return rows
-    return []
-
-
-def coerce_cleaning_plan_columns(columns: Any) -> list[dict[str, Any]]:
-    """
-    Normalize ``plan['columns']`` to a list of ``dict`` rows for diffing or editing.
-
-    Accepts the same shapes as :func:`sanitize_cleaning_plan` (list of dicts or
-    name-to-actions mapping dict).
-    """
-    return _coerce_plan_columns_to_rows(columns)
-
-
-def merged_plan_actions_by_column(columns: Any) -> dict[str, list[str]]:
-    """
-    Concatenate ``actions`` for all plan rows that share the same stripped ``name``.
-
-    The model often emits several ``{"name": "<col>", "actions": [...]}`` rows for
-    one column (e.g. early transforms, then a separate imputation or drop row).
-    Merging preserves step order and keeps the UI diff/snapshot logic consistent
-    with multiset helpers that already aggregate by column name.
-
-    Rows whose ``name`` is empty after stripping are skipped.
-
-    Parameters
-    ----------
-    columns
-        ``plan['columns']`` in any shape accepted by :func:`coerce_cleaning_plan_columns`.
-
-    Returns
-    -------
-    dict[str, list[str]]
-        Map stripped column name -> ordered action strings. Key order is first
-        appearance of each name in the coerced row list (Python 3.7+ insertion order).
-    """
-    merged: dict[str, list[str]] = {}
-    for row in coerce_cleaning_plan_columns(columns):
-        nm = str(row.get("name", "")).strip()
-        if not nm:
-            continue
-        raw = row.get("actions")
-        if isinstance(raw, list):
-            acts = [str(x) for x in raw]
-        elif raw is None:
-            acts = []
-        else:
-            acts = [str(raw)]
-        merged.setdefault(nm, []).extend(acts)
-    return merged
-
-
-def sanitize_cleaning_plan(
-    plan: dict[str, Any] | None, df: pd.DataFrame
-) -> dict[str, Any] | None:
-    """
-    Drop ``columns`` entries whose ``name`` is not an input column label or
-    its step-2 normalized form.
-
-    Also drops the app-injected synthetic row-id column from the plan (it is
-    present in ``df`` for alignment but should not appear in the user-facing
-    summary).
-
-    Appends a short note when rows are removed so the UI can explain pruning.
-
-    Parameters
-    ----------
-    plan : dict or None
-        Parsed cleaning plan (``columns``, ``row_ops``, ``notes``).
-    df : pd.DataFrame
-        The ``source_df`` frame the plan was generated for (same columns as summary).
-
-    Returns
-    -------
-    dict or None
-        A shallow-copied plan with filtered ``columns``, or None if ``plan`` is None.
-    """
-    if plan is None or not isinstance(plan, dict):
-        return plan
-    raw_cols = list(df.columns)
-    norms = {normalize_cleaning_column_name(c) for c in raw_cols}
-
-    synth_norm = normalize_cleaning_column_name(APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN)
-
-    cols_in = _coerce_plan_columns_to_rows(plan.get("columns"))
-
-    def _is_synthetic_row_id(name: str) -> bool:
-        n = str(name).strip()
-        if n == APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN:
-            return True
-        return normalize_cleaning_column_name(n) == synth_norm
-
-    def _row_allowed(name: str) -> bool:
-        """Allow only names that match an input column (after step-2 normalization)."""
-        norm_label = normalize_cleaning_column_name(name)
-        if not norm_label:
-            return False
-        return norm_label in norms
-
-    kept: list[dict[str, Any]] = []
-    dropped: list[str] = []
-    dropped_synth: list[str] = []
-    for row in cols_in:
-        if not isinstance(row, dict):
-            continue
-        nm = row.get("name")
-        if nm is None:
-            continue
-        label = str(nm).strip()
-        if _is_synthetic_row_id(label):
-            dropped_synth.append(label)
-            continue
-        if _row_allowed(label):
-            kept.append(row)
-        else:
-            dropped.append(label)
-
-    if dropped:
-        logger.info(
-            "Removed cleaning plan column rows not in dataset: %s",
-            sorted(set(dropped)),
-        )
-    if dropped_synth:
-        logger.debug(
-            "Removed synthetic row-id column from cleaning plan: %s",
-            sorted(set(dropped_synth)),
-        )
-
-    out = dict(plan)
-    out["columns"] = kept
-    note_parts: list[str] = []
-    if dropped:
-        note_parts.append(
-            "Plan rows removed (not in input columns): "
-            f"{', '.join(sorted(set(dropped)))}."
-        )
-    if note_parts:
-        prev = str(out.get("notes") or "").strip()
-        tag = " ".join(note_parts)
-        out["notes"] = f"{tag} {prev}".strip() if prev else tag
-
-    return out
 
 
 def run_cleaner_code_on_dataframe(
@@ -288,7 +107,7 @@ def summarize_cleaning_row_effects(
     row_id_col: str = APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN,
 ) -> dict[str, Any]:
     """
-    Summarize row removals between two frames for plan UI labels.
+    Summarize row removals between two frames (e.g. for outcome summaries).
 
     Uses ``row_id_col`` when present in both frames to count removed row ids and
     how many removed rows were all-null on non-id columns in ``df_before``.
@@ -422,57 +241,6 @@ class PythonOutputParser(BaseOutputParser):
         if extracted is not None:
             return extracted.strip()
         return text
-
-
-def parse_json_plan_block(text: str) -> dict[str, Any] | None:
-    """
-    Extract and parse the first ```json``` object from ``text``.
-
-    Returns
-    -------
-    dict or None
-        Parsed JSON object, or ``None`` if missing or invalid.
-    """
-    json_match = re.search(r"```json(.*?)```", text, re.DOTALL | re.IGNORECASE)
-    if not json_match:
-        return None
-    raw_json = json_match.group(1).strip()
-    try:
-        loaded = json.loads(raw_json)
-    except json.JSONDecodeError:
-        logger.warning("Invalid JSON in cleaning plan block; treating plan as None.")
-        return None
-    if not isinstance(loaded, dict):
-        logger.warning("Cleaning plan JSON was not an object; treating plan as None.")
-        return None
-    return loaded
-
-
-class DataCleaningOutputParser(BaseOutputParser):
-    """Extract Python code and optional JSON cleaning plan from LLM responses."""
-
-    @property
-    def _type(self) -> str:
-        return "data_cleaning_dual_output"
-
-    def parse(self, text: str) -> dict[str, Any]:
-        """
-        Parse ``text`` into code and an optional structured plan.
-
-        Returns
-        -------
-        dict
-            Keys: ``code`` (str), ``cleaning_plan`` (dict or None if missing/invalid).
-        """
-        extracted = _extract_python_fenced_block(text)
-        if extracted is not None:
-            code = extracted.strip()
-        else:
-            code = text.strip()
-
-        plan: dict[str, Any] | None = parse_json_plan_block(text)
-
-        return {"code": code, "cleaning_plan": plan}
 
 
 def _sample_values(series: pd.Series, n: int = 3) -> list[Any]:
@@ -778,8 +546,8 @@ def fix_agent_code(
         Key in state for tracking retry count. Defaults to "retry_count".
     output_parser : BaseOutputParser, optional
         Parser for the LLM response. Defaults to :class:`PythonOutputParser`.
-        If the parser returns a dict with keys ``code`` and ``cleaning_plan``,
-        those are merged into the returned state update.
+        If the parser returns a dict with a ``code`` key, that string is used as
+        the updated snippet.
 
     Returns
     -------
@@ -807,8 +575,6 @@ def fix_agent_code(
     }
     if isinstance(response, dict) and "code" in response:
         out[code_snippet_key] = response["code"]
-        if "cleaning_plan" in response:
-            out["cleaning_plan"] = response["cleaning_plan"]
     else:
         out[code_snippet_key] = response
 

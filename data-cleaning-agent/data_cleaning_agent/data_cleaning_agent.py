@@ -5,21 +5,17 @@ from pathlib import Path
 from typing import Any, Required, TypedDict
 
 import pandas as pd
-from langchain_core.messages import HumanMessage
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
 from langgraph.types import Checkpointer
 
 from .utils import (
-    DataCleaningOutputParser,
     PythonOutputParser,
     execute_agent_code,
     fix_agent_code,
     format_dataframe_summary,
     get_dataframe_summary,
-    parse_json_plan_block,
-    sanitize_cleaning_plan,
 )
 
 # Setup
@@ -28,13 +24,8 @@ AGENT_NAME = "lightweight_data_cleaning_agent"
 LOG_PATH = os.path.join(os.getcwd(), "logs/")
 
 
-_CODE_ONLY_PATH = Path(__file__).parent / "prompts" / "data_cleaning_code_only.md"
-_CODE_ONLY_PROMPT_TEMPLATE = _CODE_ONLY_PATH.read_text(encoding="utf-8")
-
-_PLAN_FROM_CODE_PATH = (
-    Path(__file__).parent / "prompts" / "data_cleaning_plan_from_code.md"
-)
-_PLAN_FROM_CODE_PROMPT_TEMPLATE = _PLAN_FROM_CODE_PATH.read_text(encoding="utf-8")
+_PIPELINE_PROMPT_PATH = Path(__file__).parent / "prompts" / "data_cleaning.md"
+_PIPELINE_PROMPT_TEMPLATE = _PIPELINE_PROMPT_PATH.read_text(encoding="utf-8")
 
 _FIX_PROMPT_PATH = Path(__file__).parent / "prompts" / "data_cleaning_fix.md"
 _FIX_DATA_CLEANER_PROMPT_TEMPLATE = _FIX_PROMPT_PATH.read_text(encoding="utf-8")
@@ -56,43 +47,6 @@ def _llm_content_str(msg: Any) -> str:
     return str(content)
 
 
-def _invoke_cleaning_plan_llm(
-    model: Any,
-    *,
-    user_instructions: str,
-    all_datasets_summary: str,
-    function_name: str,
-    generated_python_code: str,
-    source_df: pd.DataFrame | None,
-) -> dict | None:
-    """
-    Second LLM call: emit cleaning-plan JSON conditioned on finalized Python.
-
-    The prompt body is formatted first; the Python source is appended without
-    templating so arbitrary ``{{`` in code cannot break ``str.format``.
-    """
-    base = _PLAN_FROM_CODE_PROMPT_TEMPLATE.format(
-        user_instructions=user_instructions,
-        all_datasets_summary=all_datasets_summary,
-        function_name=function_name,
-    )
-    full_prompt = (
-        base + "\n\n## Authoritative Python (read completely before writing JSON)\n\n"
-        "```python\n" + generated_python_code + "\n```\n"
-    )
-    try:
-        msg = model.invoke([HumanMessage(content=full_prompt)])
-    except Exception:
-        logger.exception("Cleaning plan LLM invoke failed.")
-        return None
-    raw_plan = parse_json_plan_block(_llm_content_str(msg))
-    if raw_plan is None:
-        return None
-    if source_df is not None:
-        return sanitize_cleaning_plan(raw_plan, source_df)
-    return raw_plan
-
-
 def _run_data_cleaning_generation(
     model,
     *,
@@ -104,7 +58,7 @@ def _run_data_cleaning_generation(
     file_name: str,
 ) -> dict:
     """
-    Invoke the cleaning LLM twice: Python only, then plan JSON from frozen code.
+    Invoke the cleaning LLM once to produce Python cleaning code.
 
     Parameters
     ----------
@@ -126,7 +80,7 @@ def _run_data_cleaning_generation(
     Returns
     -------
     dict
-        Keys: ``data_cleaner_function``, ``cleaning_plan``, ``data_cleaner_function_path``,
+        Keys: ``data_cleaner_function``, ``data_cleaner_function_path``,
         ``data_cleaner_function_name``.
     """
     summary = get_dataframe_summary(source_df)
@@ -134,7 +88,7 @@ def _run_data_cleaning_generation(
     ui = user_instructions or "Follow the basic cleaning steps."
 
     code_prompt = PromptTemplate(
-        template=_CODE_ONLY_PROMPT_TEMPLATE,
+        template=_PIPELINE_PROMPT_TEMPLATE,
         input_variables=[
             "user_instructions",
             "all_datasets_summary",
@@ -149,15 +103,6 @@ def _run_data_cleaning_generation(
     parser = PythonOutputParser()
     code = parser.parse(_llm_content_str(msg_code))
 
-    plan = _invoke_cleaning_plan_llm(
-        model,
-        user_instructions=ui,
-        all_datasets_summary=dataset_summary,
-        function_name=function_name,
-        generated_python_code=code,
-        source_df=source_df,
-    )
-
     file_path = None
     if log:
         file_path = os.path.join(log_dir, file_name)
@@ -166,7 +111,6 @@ def _run_data_cleaning_generation(
         logger.info("Code saved to: %s", file_path)
     return {
         "data_cleaner_function": code,
-        "cleaning_plan": plan,
         "data_cleaner_function_path": file_path,
         "data_cleaner_function_name": function_name,
     }
@@ -185,7 +129,6 @@ class GraphState(TypedDict, total=False):
     data_cleaner_function_path: str
     data_cleaner_function_name: str
     data_cleaner_error: str
-    cleaning_plan: dict | None
 
 
 class LightweightDataCleaningAgent:
@@ -195,10 +138,8 @@ class LightweightDataCleaningAgent:
     Uses an LLM to create data cleaning functions based on user instructions. The agent
     automatically retries with error correction if the generated code fails.
 
-    Prompt sources: ``data_cleaning_code_only.md`` (Python generation),
-    ``data_cleaning_plan_from_code.md`` (JSON plan from finalized code),
-    ``data_cleaning_fix.md`` (error correction). See ``data_cleaning.md`` in the
-    same directory for a short index linking these files.
+    Prompt sources: ``data_cleaning.md`` (Python generation pipeline),
+    ``data_cleaning_fix.md`` (error correction).
 
     Parameters
     ----------
@@ -267,9 +208,7 @@ class LightweightDataCleaningAgent:
             here are treated as protected and exempt from drops and destructive
             transforms. When None, the agent applies its full default pipeline.
             The default pipeline text lives in
-            ``data_cleaning_agent/prompts/data_cleaning_code_only.md``; the JSON
-            plan is produced from ``data_cleaning_plan_from_code.md``. See
-            ``data_cleaning.md`` in the same folder for an index of prompt files.
+            ``data_cleaning_agent/prompts/data_cleaning.md``.
         max_retries : int, default=3
             Maximum number of retry attempts if generated code fails.
         retry_count : int, default=0
@@ -312,25 +251,15 @@ class LightweightDataCleaningAgent:
         if self.response:
             return self.response.get("data_cleaner_function")
 
-    def get_cleaning_plan(self):
-        """
-        Return the structured cleaning plan dict from the last generation or fix.
-
-        Returns None if no plan was parsed or ``invoke_agent`` / ``generate_cleaning_code``
-        has not been run yet.
-        """
-        if self.response:
-            return self.response.get("cleaning_plan")
-
     def generate_cleaning_code(
         self,
         source_df: pd.DataFrame,
         user_instructions: str | None = None,
     ) -> None:
         """
-        Run the LLM once to produce cleaning code and a structured plan (no execution).
+        Run the LLM once to produce cleaning code (no execution).
 
-        Stores partial results on ``self.response`` (code, plan, function name). Call
+        Stores partial results on ``self.response`` (code, function name). Call
         :meth:`execute_stored_cleaning` when the host app is ready to run the code.
         """
         log_dir = self.log_path if self.log_path is not None else LOG_PATH
@@ -464,40 +393,15 @@ def make_lightweight_data_cleaning_agent(
         """
         Fix errors in the generated data cleaning code.
         """
-        out = fix_agent_code(
+        return fix_agent_code(
             state=state,
             code_snippet_key="data_cleaner_function",
             error_key="data_cleaner_error",
             llm=model,
             prompt_template=_FIX_DATA_CLEANER_PROMPT_TEMPLATE,
             function_name=state.get("data_cleaner_function_name"),
-            output_parser=DataCleaningOutputParser(),
+            output_parser=PythonOutputParser(),
         )
-        raw = state.get("source_df")
-        code = out.get("data_cleaner_function")
-        if code and raw is not None:
-            df = pd.DataFrame.from_dict(raw)
-            summary = format_dataframe_summary(get_dataframe_summary(df))
-            ui = state.get("user_instructions") or "Follow the basic cleaning steps."
-            fn = state.get("data_cleaner_function_name") or function_name
-            plan = _invoke_cleaning_plan_llm(
-                model,
-                user_instructions=ui,
-                all_datasets_summary=summary,
-                function_name=fn,
-                generated_python_code=code,
-                source_df=df,
-            )
-            out = {**out, "cleaning_plan": plan}
-        elif out.get("cleaning_plan") is not None and raw is not None:
-            out = {
-                **out,
-                "cleaning_plan": sanitize_cleaning_plan(
-                    out["cleaning_plan"],
-                    pd.DataFrame.from_dict(raw),
-                ),
-            }
-        return out
 
     # Build the workflow graph
     workflow = StateGraph(GraphState)
