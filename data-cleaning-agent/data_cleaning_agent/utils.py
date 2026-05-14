@@ -2,9 +2,7 @@
 
 import json
 import logging
-import os
 import re
-import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,23 +11,6 @@ import pandas as pd
 from langchain_core.output_parsers import BaseOutputParser
 
 logger = logging.getLogger(__name__)
-
-# #region agent log
-def _agent_debug_ndjson(payload: dict) -> None:
-    """Append one NDJSON line for Cursor debug mode (do not log secrets/PII)."""
-    log_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "debug-19e7b0.log",
-    )
-    line = {"sessionId": "19e7b0", "timestamp": int(time.time() * 1000), **payload}
-    try:
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(line, default=str) + "\n")
-    except OSError:
-        pass
-
-
-# #endregion
 
 
 # Synthetic stable row id injected by the Streamlit app (see ``preview_helpers.AGENT_ROW_ID``).
@@ -42,65 +23,81 @@ def sanitize_generated_cleaner_drop_exemptions(
     user_instructions: str | None,
 ) -> str:
     """
-    Remove hard-coded ``employee_id`` paired with the synthetic row id in drop exemptions.
+    Collapse two-literal exemptions that pair the synthetic row id with another name.
 
-    The cleaning LLM sometimes lists ``employee_id`` next to ``__agent_row_id__`` in
-    ``.difference([...])`` (or similar) even when User Instructions do not name that
-    column as protected. When ``employee_id`` appears in User Instructions
-    (case-insensitive), the code is left unchanged.
+    The cleaning LLM often adds extra column names next to ``__agent_row_id__`` in
+    list/set/``pd.Index`` literals used with ``.difference`` (or similar), even when
+    User Instructions do not name those columns as protected. Any second literal
+    whose text is **not** a case-insensitive substring of User Instructions is
+    removed, leaving only ``__agent_row_id__``. Two-literal forms only (typical LLM
+    output); more complex literals are left unchanged.
     """
     if not code:
         return code
-    if "employee_id" in (user_instructions or "").lower():
-        return code
+    ui = (user_instructions or "").lower()
+    rid = APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN
+    rid_re = re.escape(rid)
 
-    rid = re.escape(APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN)
+    def _extra_protected(extra: str) -> bool:
+        return extra.lower() in ui
 
-    def _list_agent_first(m: re.Match) -> str:
-        q = m.group(1)
-        return f"[{q}{APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN}{q}]"
+    def _list_rowid_then_extra(m: re.Match) -> str:
+        q, extra = m.group(1), m.group(2)
+        if _extra_protected(extra):
+            return m.group(0)
+        return f"[{q}{rid}{q}]"
 
-    def _list_eid_first(m: re.Match) -> str:
-        q = m.group(1)
-        return f"[{q}{APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN}{q}]"
+    def _list_extra_then_rowid(m: re.Match) -> str:
+        q, extra = m.group(1), m.group(2)
+        if extra == rid or _extra_protected(extra):
+            return m.group(0)
+        return f"[{q}{rid}{q}]"
 
-    def _set_pair(m: re.Match) -> str:
-        q = m.group(1)
-        return "{" + f"{q}{APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN}{q}" + "}"
+    def _set_rowid_then_extra(m: re.Match) -> str:
+        q, extra = m.group(1), m.group(2)
+        if _extra_protected(extra):
+            return m.group(0)
+        return "{" + f"{q}{rid}{q}" + "}"
 
-    def _pd_index_pair(m: re.Match) -> str:
-        q = m.group(1)
-        return f"pd.Index([{q}{APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN}{q}])"
+    def _set_extra_then_rowid(m: re.Match) -> str:
+        q, extra = m.group(1), m.group(2)
+        if extra == rid or _extra_protected(extra):
+            return m.group(0)
+        return "{" + f"{q}{rid}{q}" + "}"
+
+    def _pd_rowid_then_extra(m: re.Match) -> str:
+        q, extra = m.group(1), m.group(2)
+        if _extra_protected(extra):
+            return m.group(0)
+        return f"pd.Index([{q}{rid}{q}])"
+
+    def _pd_extra_then_rowid(m: re.Match) -> str:
+        q, extra = m.group(1), m.group(2)
+        if extra == rid or _extra_protected(extra):
+            return m.group(0)
+        return f"pd.Index([{q}{rid}{q}])"
 
     subs: tuple[tuple[str, Any], ...] = (
+        (rf"\[\s*([\"']){rid_re}\1\s*,\s*\1([^\"']+)\1\s*\]", _list_rowid_then_extra),
+        (rf"\[\s*([\"'])([^\"']+)\1\s*,\s*\1{rid_re}\1\s*\]", _list_extra_then_rowid),
+        (rf"\{{\s*([\"']){rid_re}\1\s*,\s*\1([^\"']+)\1\s*\}}", _set_rowid_then_extra),
+        (rf"\{{\s*([\"'])([^\"']+)\1\s*,\s*\1{rid_re}\1\s*\}}", _set_extra_then_rowid),
         (
-            rf"\[\s*([\"']){rid}\1\s*,\s*\1employee_id\1\s*\]",
-            _list_agent_first,
+            rf"pd\.Index\(\[\s*([\"']){rid_re}\1\s*,\s*\1([^\"']+)\1\s*\]\)",
+            _pd_rowid_then_extra,
         ),
         (
-            rf"\[\s*([\"'])employee_id\1\s*,\s*\1{rid}\1\s*\]",
-            _list_eid_first,
-        ),
-        (
-            rf"\{{\s*([\"']){rid}\1\s*,\s*\1employee_id\1\s*\}}",
-            _set_pair,
-        ),
-        (
-            rf"\{{\s*([\"'])employee_id\1\s*,\s*\1{rid}\1\s*\}}",
-            _set_pair,
-        ),
-        (
-            rf"pd\.Index\(\[\s*([\"']){rid}\1\s*,\s*\1employee_id\1\s*\]\)",
-            _pd_index_pair,
-        ),
-        (
-            rf"pd\.Index\(\[\s*([\"'])employee_id\1\s*,\s*\1{rid}\1\s*\]\)",
-            _pd_index_pair,
+            rf"pd\.Index\(\[\s*([\"'])([^\"']+)\1\s*,\s*\1{rid_re}\1\s*\]\)",
+            _pd_extra_then_rowid,
         ),
     )
     out = code
-    for pat, repl in subs:
-        out = re.sub(pat, repl, out)
+    for _ in range(8):
+        prev = out
+        for pat, repl in subs:
+            out = re.sub(pat, repl, out)
+        if out == prev:
+            break
     return out
 
 
@@ -855,25 +852,6 @@ def fix_agent_code(
     code_snippet = state.get(code_snippet_key)
     error_message = state.get(error_key)
 
-    # #region agent log
-    if isinstance(code_snippet, str):
-        ei = code_snippet.find("employee_id")
-        _agent_debug_ndjson(
-            {
-                "hypothesisId": "H4",
-                "location": "utils.py:fix_agent_code",
-                "message": "pre_fix_code_scan",
-                "data": {
-                    "has_difference_and_employee_id": "difference" in code_snippet
-                    and "employee_id" in code_snippet,
-                    "snippet": (
-                        code_snippet[max(0, ei - 120) : ei + 180] if ei != -1 else ""
-                    ),
-                },
-            }
-        )
-    # #endregion
-
     prompt = prompt_template.format(
         code_snippet=code_snippet,
         error=error_message,
@@ -899,23 +877,5 @@ def fix_agent_code(
         out[code_snippet_key] = sanitize_generated_cleaner_drop_exemptions(
             _fk, state.get("user_instructions")
         )
-
-    # #region agent log
-    fixed = out.get(code_snippet_key)
-    if isinstance(fixed, str):
-        ei2 = fixed.find("employee_id")
-        _agent_debug_ndjson(
-            {
-                "hypothesisId": "H4",
-                "location": "utils.py:fix_agent_code",
-                "message": "post_fix_code_scan",
-                "data": {
-                    "has_difference_and_employee_id": "difference" in fixed
-                    and "employee_id" in fixed,
-                    "snippet": fixed[max(0, ei2 - 120) : ei2 + 180] if ei2 != -1 else "",
-                },
-            }
-        )
-    # #endregion
 
     return out

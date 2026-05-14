@@ -86,27 +86,33 @@ class TestGetDataFrameSummary:
 
 @pytest.mark.unit
 class TestSanitizeGeneratedCleanerDropExemptions:
-    """Strip spurious ``employee_id`` from step-3 drop exemption literals."""
+    """Remove spurious second literals paired with ``__agent_row_id__`` unless named in UI."""
 
-    _BAD_LINE = (
+    _BAD_EMP = (
         "cols_to_drop = missing_share[missing_share > 0.4].index.difference("
         "['__agent_row_id__', 'employee_id'])"
     )
 
     def test_removes_employee_id_when_not_in_user_instructions(self):
         out = sanitize_generated_cleaner_drop_exemptions(
-            self._BAD_LINE, "Follow the basic cleaning steps."
+            self._BAD_EMP, "Follow the basic cleaning steps."
         )
         assert "employee_id" not in out
         assert "['__agent_row_id__']" in out
 
+    def test_removes_other_id_column_when_not_in_user_instructions(self):
+        line = "x = idx.difference(['__agent_row_id__', 'customer_uuid'])"
+        out = sanitize_generated_cleaner_drop_exemptions(line, "")
+        assert "customer_uuid" not in out
+        assert "'__agent_row_id__'" in out
+
     def test_removes_when_user_instructions_is_none(self):
-        out = sanitize_generated_cleaner_drop_exemptions(self._BAD_LINE, None)
+        out = sanitize_generated_cleaner_drop_exemptions(self._BAD_EMP, None)
         assert "employee_id" not in out
 
     def test_preserves_when_user_instructions_name_employee_id(self):
         out = sanitize_generated_cleaner_drop_exemptions(
-            self._BAD_LINE, "Do not drop employee_id"
+            self._BAD_EMP, "Do not drop employee_id"
         )
         assert "employee_id" in out
 

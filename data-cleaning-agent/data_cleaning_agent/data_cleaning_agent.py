@@ -14,7 +14,6 @@ from langgraph.types import Checkpointer
 from .utils import (
     DataCleaningOutputParser,
     PythonOutputParser,
-    _agent_debug_ndjson,
     execute_agent_code,
     fix_agent_code,
     format_dataframe_summary,
@@ -150,73 +149,7 @@ def _run_data_cleaning_generation(
     })
     parser = PythonOutputParser()
     code = parser.parse(_llm_content_str(msg_code))
-
-    # #region agent log
-    def _dbg_scan_generated(py: str) -> dict[str, Any]:
-        ei = py.find("employee_id")
-        return {
-            "has_employee_id": "employee_id" in py,
-            "has_difference": "difference" in py,
-            "likely_drop_exclusion": "difference" in py and "employee_id" in py,
-            "snippet": py[max(0, ei - 120) : ei + 180] if ei != -1 else "",
-            "code_len": len(py),
-        }
-
-    _agent_debug_ndjson(
-        {
-            "hypothesisId": "H1",
-            "location": "data_cleaning_agent.py:_run_data_cleaning_generation",
-            "message": "user_instructions_scan",
-            "data": {
-                "employee_id_substring_in_ui": "employee_id" in ui.lower(),
-                "ui_len": len(ui),
-                "ui_head_240": ui[:240],
-            },
-        }
-    )
-    _agent_debug_ndjson(
-        {
-            "hypothesisId": "H2",
-            "location": "data_cleaning_agent.py:_run_data_cleaning_generation",
-            "message": "dataset_summary_scan",
-            "data": {
-                "employee_id_substring_in_summary": "employee_id"
-                in dataset_summary.lower(),
-                "summary_len": len(dataset_summary),
-            },
-        }
-    )
-    _agent_debug_ndjson(
-        {
-            "hypothesisId": "H3",
-            "location": "data_cleaning_agent.py:_run_data_cleaning_generation",
-            "message": "initial_generated_code_scan",
-            "data": _dbg_scan_generated(code),
-        }
-    )
-    _agent_debug_ndjson(
-        {
-            "hypothesisId": "H5",
-            "location": "data_cleaning_agent.py:_run_data_cleaning_generation",
-            "message": "code_only_template_employee_id_count",
-            "data": {
-                "employee_id_occurrences_in_md": _CODE_ONLY_PROMPT_TEMPLATE.count(
-                    "employee_id"
-                ),
-            },
-        }
-    )
     code = sanitize_generated_cleaner_drop_exemptions(code, user_instructions)
-    _agent_debug_ndjson(
-        {
-            "hypothesisId": "H6",
-            "runId": "post-sanitize",
-            "location": "data_cleaning_agent.py:_run_data_cleaning_generation",
-            "message": "after_sanitize_code_scan",
-            "data": _dbg_scan_generated(code),
-        }
-    )
-    # #endregion
 
     plan = _invoke_cleaning_plan_llm(
         model,
