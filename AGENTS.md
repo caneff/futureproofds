@@ -12,6 +12,7 @@
 - Jupyter notebooks must remain reproducible: no hard-coded paths, use relative paths.
 
 ## Agent Instructions
+- **Data cleaning agent (canonical):** Unless the user explicitly points at another path, *the* data cleaning agent for this repo is [`data-cleaning-agent-new/`](data-cleaning-agent-new/). Treat [`data-cleaning-agent/`](data-cleaning-agent/) as **historical reference only**—do not implement new features or fixes there unless the user asks for that tree by name.
 - **Specs and design docs:** **Never commit** design specs, implementation plans, or brainstorming write-ups. Keep them only under gitignored paths (e.g. `docs/superpowers/`, `docs/data-cleaning-agent/`). Do not add tracked `docs/**` spec trees or copy specs into the codebase for version control. If the user wants a spec shared, they paste or attach it; agents do not commit specs.
 - When in doubt whether a change is "small," treat it as large: plan first, then implement after confirmation.
 - Run `pytest -q` after changes and share results.

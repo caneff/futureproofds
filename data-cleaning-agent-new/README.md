@@ -1,5 +1,7 @@
 # Data Cleaning Agent
 
+> **Monorepo note:** In this repository, this **`data-cleaning-agent-new/`** tree is the **active** data cleaning agent. The sibling **`data-cleaning-agent/`** folder is historical only unless you are told otherwise.
+
 An AI-powered data cleaning agent that automatically cleans messy datasets using LangChain and LangGraph. The agent uses an LLM to generate and execute Python code for common data cleaning tasks like handling missing values, removing duplicates, and dropping low-quality columns.
 
 ## How It Works
@@ -123,7 +125,7 @@ cleaned_df.to_csv("cleaned_data.csv", index=False)
 # Give specific cleaning instructions to the agent
 agent.invoke_agent(
     data_raw=df,
-    user_instructions="Remove columns with more than 30% missing values and standardize date formats"
+    user_instructions="Remove columns with more than 30% missing values and standardize date formats",
 )
 ```
 
