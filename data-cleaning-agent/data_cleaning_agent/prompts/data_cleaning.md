@@ -6,6 +6,9 @@ when **User Instructions** explicitly require omitting a named operation;
 then omit only those operations while keeping the rest of the pipeline coherent, and
 make the JSON cleaning plan describe what the code does.
 
+Application synthetic row id (must match the Streamlit app constant ``preview_helpers.AGENT_ROW_ID``, currently ``__agent_row_id__``):
+The column ``__agent_row_id__`` is a synthetic stable row identifier added by the application before cleaning. Do not drop it, rename it, or change its values. Carry it through unchanged for every row that remains in the returned DataFrame so before-and-after rows can be aligned.
+
 Hard constraints:
 - Start with: df = source_df.copy(). Never mutate source_df.
 - Be deterministic. Do not use randomness. If you must, seed it with 0.
@@ -155,9 +158,6 @@ Pipeline (in order):
 
 User Instructions:
 {user_instructions}
-
-Application synthetic row id (must match the Streamlit app constant ``preview_helpers.AGENT_ROW_ID``, currently ``__agent_row_id__``):
-The column ``__agent_row_id__`` is a synthetic stable row identifier added by the application before cleaning. Do not drop it, rename it, or change its values. Carry it through unchanged for every row that remains in the returned DataFrame so before-and-after rows can be aligned.
 
 Dataset Summary:
 {all_datasets_summary}
