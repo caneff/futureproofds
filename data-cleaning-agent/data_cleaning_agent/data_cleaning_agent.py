@@ -31,7 +31,9 @@ LOG_PATH = os.path.join(os.getcwd(), "logs/")
 _CODE_ONLY_PATH = Path(__file__).parent / "prompts" / "data_cleaning_code_only.md"
 _CODE_ONLY_PROMPT_TEMPLATE = _CODE_ONLY_PATH.read_text(encoding="utf-8")
 
-_PLAN_FROM_CODE_PATH = Path(__file__).parent / "prompts" / "data_cleaning_plan_from_code.md"
+_PLAN_FROM_CODE_PATH = (
+    Path(__file__).parent / "prompts" / "data_cleaning_plan_from_code.md"
+)
 _PLAN_FROM_CODE_PROMPT_TEMPLATE = _PLAN_FROM_CODE_PATH.read_text(encoding="utf-8")
 
 _FIX_PROMPT_PATH = Path(__file__).parent / "prompts" / "data_cleaning_fix.md"
@@ -75,11 +77,8 @@ def _invoke_cleaning_plan_llm(
         function_name=function_name,
     )
     full_prompt = (
-        base
-        + "\n\n## Authoritative Python (read completely before writing JSON)\n\n"
-        "```python\n"
-        + generated_python_code
-        + "\n```\n"
+        base + "\n\n## Authoritative Python (read completely before writing JSON)\n\n"
+        "```python\n" + generated_python_code + "\n```\n"
     )
     try:
         msg = model.invoke([HumanMessage(content=full_prompt)])

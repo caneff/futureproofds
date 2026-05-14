@@ -413,9 +413,7 @@ def parse_json_plan_block(text: str) -> dict[str, Any] | None:
     try:
         loaded = json.loads(raw_json)
     except json.JSONDecodeError:
-        logger.warning(
-            "Invalid JSON in cleaning plan block; treating plan as None."
-        )
+        logger.warning("Invalid JSON in cleaning plan block; treating plan as None.")
         return None
     if not isinstance(loaded, dict):
         logger.warning("Cleaning plan JSON was not an object; treating plan as None.")

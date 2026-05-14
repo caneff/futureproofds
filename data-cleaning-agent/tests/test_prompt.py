@@ -1,6 +1,6 @@
-import pytest
 from pathlib import Path
 
+import pytest
 from data_cleaning_agent.data_cleaning_agent import (
     _CODE_ONLY_PROMPT_TEMPLATE,
     _FIX_DATA_CLEANER_PROMPT_TEMPLATE,
