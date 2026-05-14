@@ -62,5 +62,5 @@ Return **two** blocks in this exact order:
 Broken code:
 {code_snippet}
 
-Error (may be a Python traceback **or** a host verification message such as retain-plan mismatch):
+Error (may be a Python traceback):
 {error}

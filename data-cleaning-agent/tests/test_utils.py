@@ -10,7 +10,6 @@ from data_cleaning_agent.utils import (
     fix_agent_code,
     format_dataframe_summary,
     get_dataframe_summary,
-    plan_step9_policy_host_supplement,
 )
 
 
@@ -264,17 +263,3 @@ class TestFixAgentCode:
         )
 
         assert out["attempts"] == 3
-
-
-def test_plan_step9_policy_host_supplement_lists_columns_with_missingness() -> None:
-    rid = APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN
-    df = pd.DataFrame({rid: [0, 1], "city": ["London", None], "age": [1.0, 2.0]})
-    out = plan_step9_policy_host_supplement(df, row_id_col=rid)
-    assert "`city`" in out
-    assert "age" not in out
-    assert "impute missing values" in out or "retain missing values" in out
-
-
-def test_plan_step9_policy_host_supplement_empty_when_no_missing() -> None:
-    df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
-    assert plan_step9_policy_host_supplement(df, row_id_col="__unused__") == ""

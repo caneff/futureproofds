@@ -327,47 +327,6 @@ class LightweightDataCleaningAgent:
         }
         return exec_out
 
-    def regenerate_plan_after_execute_error(self, error_message: str) -> None:
-        """
-        After a failed execute, run the fix LLM to refresh code and JSON plan together.
-
-        Clears ``data_cleaned`` / ``data_cleaner_error`` from the previous attempt on
-        ``self.response`` so the host UI can refresh before retrying execute.
-        """
-        if not self.response or not self.response.get("data_cleaner_function"):
-            msg = "No stored cleaning code to fix."
-            raise ValueError(msg)
-        fix_state: dict = {
-            "data_cleaner_function": self.response["data_cleaner_function"],
-            "data_cleaner_error": error_message,
-            "retry_count": int(self.response.get("retry_count") or 0),
-            "data_cleaner_function_name": self.response.get(
-                "data_cleaner_function_name"
-            )
-            or self.function_name,
-        }
-        fixed = fix_agent_code(
-            state=fix_state,
-            code_snippet_key="data_cleaner_function",
-            error_key="data_cleaner_error",
-            llm=self.model,
-            prompt_template=_FIX_DATA_CLEANER_PROMPT_TEMPLATE,
-            function_name=fix_state.get("data_cleaner_function_name"),
-            output_parser=DataCleaningOutputParser(),
-        )
-        plan = fixed.get("cleaning_plan")
-        raw = self.response.get("source_df")
-        if plan is not None and raw is not None:
-            plan = sanitize_cleaning_plan(plan, pd.DataFrame.from_dict(raw))
-        self.response = {
-            **(self.response or {}),
-            "data_cleaner_function": fixed["data_cleaner_function"],
-            "cleaning_plan": plan,
-            "data_cleaner_error": None,
-            "data_cleaned": None,
-            "retry_count": fixed.get("retry_count", fix_state["retry_count"] + 1),
-        }
-
 
 # Agent Factory Function
 

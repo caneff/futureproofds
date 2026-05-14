@@ -3,7 +3,6 @@
 import json
 import logging
 import re
-from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -122,73 +121,6 @@ def merged_plan_actions_by_column(columns: Any) -> dict[str, list[str]]:
             acts = [str(raw)]
         merged.setdefault(nm, []).extend(acts)
     return merged
-
-
-def removed_plan_actions(
-    before_columns: Any,
-    after_columns: Any,
-) -> list[tuple[str, str]]:
-    """
-    List ``(column_name, action)`` pairs multiset-removed from *before* to *after*.
-
-    Column names are compared as stripped strings. Actions are compared as
-    strings. Duplicate actions in the same column are handled by multiset
-    subtraction.
-
-    Parameters
-    ----------
-    before_columns, after_columns
-        ``plan['columns']`` in any shape accepted by :func:`coerce_cleaning_plan_columns`.
-
-    Returns
-    -------
-    list[tuple[str, str]]
-        Sorted list of removed pairs for stable tests and deterministic prompts.
-    """
-
-    def _action_counter(rows: list[dict[str, Any]]) -> dict[str, Counter[str]]:
-        by_col: dict[str, Counter[str]] = {}
-        for row in rows:
-            name = str(row.get("name", "")).strip()
-            if not name:
-                continue
-            raw = row.get("actions")
-            if isinstance(raw, list):
-                acts = [str(x) for x in raw]
-            elif raw is None:
-                acts = []
-            else:
-                acts = [str(raw)]
-            by_col.setdefault(name, Counter()).update(acts)
-        return by_col
-
-    b = _action_counter(coerce_cleaning_plan_columns(before_columns))
-    a = _action_counter(coerce_cleaning_plan_columns(after_columns))
-    out: list[tuple[str, str]] = []
-    for col, ctr_b in b.items():
-        ctr_a = a.get(col, Counter())
-        for act, n_b in ctr_b.items():
-            removed = n_b - ctr_a.get(act, 0)
-            for _ in range(max(0, removed)):
-                out.append((col, act))
-    return sorted(out)
-
-
-def multiset_union_removed_plan_pairs(
-    left: list[tuple[str, str]],
-    right: list[tuple[str, str]],
-) -> list[tuple[str, str]]:
-    """
-    Multiset sum of two ``(column, action)`` lists, sorted like :func:`removed_plan_actions`.
-
-    Used when plan-edit regeneration must remember **all** removals across successive
-    regens while ``plan_snapshot_for_code`` only tracks the last accepted plan.
-    """
-    c = Counter(left) + Counter(right)
-    out: list[tuple[str, str]] = []
-    for (col, act), n in sorted(c.items()):
-        out.extend([(col, act)] * n)
-    return out
 
 
 def sanitize_cleaning_plan(
@@ -716,52 +648,6 @@ def format_dataframe_summary(summary: DataFrameSummary) -> str:
             )
         lines.append("")
     return "\n".join(lines).rstrip()
-
-
-def plan_step9_policy_host_supplement(
-    df: pd.DataFrame,
-    *,
-    row_id_col: str = APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN,
-    max_columns_listed: int = 40,
-) -> str:
-    """
-    Host text appended to supplemental instructions so the model lists step 9.
-
-    Lists columns that already show pandas-missing values in ``df`` (via
-    :func:`get_dataframe_summary`) so the LLM must add either an imputation
-    action or ``retain missing values`` for survivors in the cleaning-plan JSON.
-    """
-    summary = get_dataframe_summary(df)
-    names: list[str] = []
-    for col in summary.columns.values():
-        if col.name == row_id_col:
-            continue
-        if col.missing_pct > 0.0:
-            names.append(col.name)
-    if not names:
-        return ""
-    shown = names[:max_columns_listed]
-    tail = ""
-    if len(names) > max_columns_listed:
-        tail = (
-            f" …and {len(names) - max_columns_listed} more column(s) with "
-            "missing values in this upload."
-        )
-    listed = ", ".join(f"`{n}`" for n in shown)
-    return (
-        "\n\n**Step 9 cleaning-plan JSON (mandatory):** This upload's Dataset Summary "
-        "shows **>0%** pandas-missing values before cleaning for: "
-        f"{listed}.{tail} For **each** such column that **remains** on ``df`` after "
-        "pipeline steps **3** and **7** and is **not** exempt from step **9** under your "
-        "step **8** ID-like rules, ``columns[].actions`` **must** include **either** "
-        '`"impute missing values (mean)"`, `"impute missing values (median)"`, '
-        '`"impute missing values (mode)"` **or** `"retain missing values"` '
-        "(whichever matches what step **9** actually does for that column). "
-        "Place that phrase among the per-column actions (typically after strip / "
-        "placeholder / dtype steps). Do **not** omit both; do **not** rely on "
-        "``notes`` alone for this obligation. Columns dropped in step 3 or 7 use "
-        "drop actions instead and are exempt."
-    )
 
 
 def execute_agent_code(
