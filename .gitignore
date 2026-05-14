@@ -4,6 +4,9 @@
 # Superpowers stuff (local only; not versioned)
 docs/superpowers/
 
+# Design specs and local cleaning-agent write-ups (never commit)
+docs/data-cleaning-agent/
+
 __pycache__/
 *.py[cod]
 .venv/
