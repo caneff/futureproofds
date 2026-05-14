@@ -2,7 +2,9 @@
 
 import json
 import logging
+import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,6 +13,24 @@ import pandas as pd
 from langchain_core.output_parsers import BaseOutputParser
 
 logger = logging.getLogger(__name__)
+
+# #region agent log
+def _agent_debug_ndjson(payload: dict) -> None:
+    """Append one NDJSON line for Cursor debug mode (do not log secrets/PII)."""
+    log_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "debug-19e7b0.log",
+    )
+    line = {"sessionId": "19e7b0", "timestamp": int(time.time() * 1000), **payload}
+    try:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(line, default=str) + "\n")
+    except OSError:
+        pass
+
+
+# #endregion
+
 
 # Synthetic stable row id injected by the Streamlit app (see ``preview_helpers.AGENT_ROW_ID``).
 # Keep identical; omit from user-facing cleaning plans.
@@ -767,6 +787,25 @@ def fix_agent_code(
     code_snippet = state.get(code_snippet_key)
     error_message = state.get(error_key)
 
+    # #region agent log
+    if isinstance(code_snippet, str):
+        ei = code_snippet.find("employee_id")
+        _agent_debug_ndjson(
+            {
+                "hypothesisId": "H4",
+                "location": "utils.py:fix_agent_code",
+                "message": "pre_fix_code_scan",
+                "data": {
+                    "has_difference_and_employee_id": "difference" in code_snippet
+                    and "employee_id" in code_snippet,
+                    "snippet": (
+                        code_snippet[max(0, ei - 120) : ei + 180] if ei != -1 else ""
+                    ),
+                },
+            }
+        )
+    # #endregion
+
     prompt = prompt_template.format(
         code_snippet=code_snippet,
         error=error_message,
@@ -786,5 +825,23 @@ def fix_agent_code(
             out["cleaning_plan"] = response["cleaning_plan"]
     else:
         out[code_snippet_key] = response
+
+    # #region agent log
+    fixed = out.get(code_snippet_key)
+    if isinstance(fixed, str):
+        ei2 = fixed.find("employee_id")
+        _agent_debug_ndjson(
+            {
+                "hypothesisId": "H4",
+                "location": "utils.py:fix_agent_code",
+                "message": "post_fix_code_scan",
+                "data": {
+                    "has_difference_and_employee_id": "difference" in fixed
+                    and "employee_id" in fixed,
+                    "snippet": fixed[max(0, ei2 - 120) : ei2 + 180] if ei2 != -1 else "",
+                },
+            }
+        )
+    # #endregion
 
     return out
