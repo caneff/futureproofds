@@ -7,9 +7,6 @@ docs/superpowers/
 # Design specs and local cleaning-agent write-ups (never commit)
 docs/data-cleaning-agent/
 
-# Local reference clone of upstream repo (nested .git; not vendored here)
-data-cleaning-agent-new/
-
 __pycache__/
 *.py[cod]
 .venv/
