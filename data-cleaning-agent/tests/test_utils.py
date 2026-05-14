@@ -42,8 +42,6 @@ class TestGetDataFrameSummary:
     @pytest.mark.parametrize(
         "col,flag,expected",
         [
-            pytest.param("user_id", "id_like", True, id="id_like-true-user_id"),
-            pytest.param("country", "id_like", False, id="id_like-false-country"),
             pytest.param("signup_date", "looks_date_like", True, id="date_like-true"),
             pytest.param("country", "looks_date_like", False, id="date_like-false"),
             pytest.param(
@@ -71,15 +69,15 @@ class TestGetDataFrameSummary:
         assert stats is not None
         assert stats.std == 0.0
 
-    def test_detects_id_like_via_monotonic_int(self, monotonic_int_df):
+    def test_monotonic_int_column_summarizes(self, monotonic_int_df):
         summary = get_dataframe_summary(monotonic_int_df)
-        assert summary.columns["counter"].id_like is True
+        assert summary.columns["counter"].name == "counter"
+        assert summary.n_rows == len(monotonic_int_df)
 
     def test_handles_empty_dataframe(self, empty_df):
         summary = get_dataframe_summary(empty_df)
         assert summary.n_rows == 0
         assert summary.columns["a"].missing_pct == 0.0
-        assert summary.columns["a"].id_like is False
 
     def test_boolean_like_false_when_cardinality_above_two(self, summary):
         assert summary.columns["country"].looks_boolean_like is False
@@ -94,8 +92,8 @@ class TestFormatDataFrameSummary:
         assert "Rows: 5" in text
         assert "Columns: 6" in text
 
-    def test_formatted_summary_omits_id_like_line(self, summary):
-        """LLM prompt must not include id_like; step 8 uses in-code rules only."""
+    def test_formatted_summary_has_no_id_like_token(self, summary):
+        """Regression: summary text must not revive removed id_like metadata."""
         text = format_dataframe_summary(summary)
         assert "id_like" not in text
 

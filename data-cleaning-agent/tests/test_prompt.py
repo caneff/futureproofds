@@ -47,7 +47,7 @@ def test_code_only_prompt_renders_with_only_expected_variables():
     assert "missing share **> 0.4**" in rendered
     assert "Forbidden: do not loop over all object" in rendered
     assert "employee_id" in rendered
-    assert "Dataset Summary does not flag ID-like columns" in rendered
+    assert "Dataset Summary does not flag row keys" in rendered
     assert "Step-3 exemptions are **only** those two cases" in rendered
     assert "<u>" in rendered
     assert "__agent_row_id__" in rendered

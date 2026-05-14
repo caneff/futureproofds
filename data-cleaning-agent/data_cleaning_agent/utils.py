@@ -369,7 +369,6 @@ class ColumnSummary:
     numeric_stats: NumericStats | None
     # List of {"value": str, "pct": float} entries, top 3 by frequency.
     top_categories: list[dict] | None
-    id_like: bool
     looks_date_like: bool
     looks_numeric_string_like: bool
     looks_boolean_like: bool
@@ -493,21 +492,6 @@ def _top_categories(series: pd.Series, n: int = 3) -> list[dict]:
     ]
 
 
-def _detect_id_like(series: pd.Series, n_rows: int, cardinality: int) -> bool:
-    """Cardinality must equal n_rows AND (name ends with id/uuid OR strictly increasing int)."""
-    if cardinality != n_rows or n_rows == 0:
-        return False
-    if str(series.name).lower().endswith(("id", "uuid")):
-        return True
-    if pd.api.types.is_integer_dtype(series):
-        mono = series.is_monotonic_increasing
-        uniq = series.is_unique
-        if isinstance(mono, pd.Series) or isinstance(uniq, pd.Series):
-            return False
-        return bool(mono) and bool(uniq)
-    return False
-
-
 def _detect_date_like(series: pd.Series) -> bool:
     """At least 90% of non-null values parse as datetime."""
     non_null = series.dropna()
@@ -562,7 +546,6 @@ def _summarize_column(name: str, series: pd.Series, n_rows: int) -> ColumnSummar
             if not is_numeric and 0 < cardinality <= 20
             else None
         ),
-        id_like=_detect_id_like(series, n_rows, cardinality),
         looks_date_like=_detect_date_like(series) if is_string else False,
         looks_numeric_string_like=_detect_numeric_string_like(series)
         if is_string
@@ -579,8 +562,8 @@ def get_dataframe_summary(df: pd.DataFrame) -> DataFrameSummary:
 
     Captures per-column dtype, missingness, cardinality, sample values, numeric
     stats (when numeric), top categories (when low-cardinality non-numeric), and
-    detection flags for ID-likeness, date-like strings, numeric-string-like
-    values, and boolean-like values.
+    detection flags for date-like strings, numeric-string-like values, and
+    boolean-like values.
 
     Parameters
     ----------
@@ -613,9 +596,9 @@ def format_dataframe_summary(summary: DataFrameSummary) -> str:
     Produces the string interpolated into the ``{all_datasets_summary}`` slot of
     the cleaning prompt. Lines are emitted only when relevant (numeric stats
     only for numeric columns, top categories only when populated, detection only
-    when at least one flag is True). ``ColumnSummary.id_like`` is intentionally
-    omitted from this text so the model does not treat it as a step-3 exemption;
-    step 8 ID-like rules are applied in code from the surviving ``df`` only.
+    when at least one flag is True). Row-key detection for step-9 imputation
+    skips is defined only in the pipeline prompt (step 8) and implemented in
+    generated code, not in this summary.
 
     Parameters
     ----------

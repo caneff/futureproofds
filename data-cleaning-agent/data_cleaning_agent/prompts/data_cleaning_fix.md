@@ -17,10 +17,10 @@ When correcting, enforce these rules (pandas Copy-on-Write):
 - If the error is a ``KeyError`` for a column name, ensure that column was not
   dropped in steps 3 or 7; never reference dropped columns in later steps—derive
   step 9 imputation targets only from ``df.columns`` after drops.
-- Step 8 ID-like rules **do not** exempt any column from step 3: if missing share
+- Step 8 **row-key** rules **do not** exempt any column from step 3: if missing share
   on a column is **> 0.4**, drop it there unless User Instructions
-  name it as protected. ID-like classification applies only to columns that
-  **survive** steps 3 and 7 and are truly unique row keys.
+  name it as protected. Row-key detection applies only to columns that
+  **survive** steps 3 and 7 and is used **only** to skip step-9 fills (mean/median/mode).
 - **Never** invent ``fillna("unknown")`` (or similar default tokens) on label
   columns unless User Instructions name that exact sentinel; otherwise leave
   NaN. High-missing columns belong in step 3 drops, not synthetic fills.
@@ -51,9 +51,10 @@ Return **two** blocks in this exact order:
    If the code leaves missing values unfilled on purpose, list
    ``"retain missing values"`` (or equivalent)—do not claim ``"impute missing values (unknown)"``.
    If Dataset Summary showed **>0%** missing on a column before cleaning and that
-   column still exists after steps 3–7 and is not ID-exempt in step 8, the JSON
-   **must** still include either an explicit imputation line or
-   ``"retain missing values"`` for it—do not leave only strip/normalize/dtype lines.
+   column still exists after steps 3–7, the JSON **must** still include either an
+   explicit imputation line or ``"retain missing values"`` for it when missing
+   values remain unfilled after step 9 (including **step-8 row keys**, which step 9
+   never fills—use ``retain missing values`` there)—do not leave only strip/normalize/dtype lines.
    Preserve display casing on string labels (no forced lowercasing in step 4).
    Every ``columns[]`` row must list ``"normalize name"`` first when step 2 runs
    on the frame, including numeric columns. Each

@@ -62,8 +62,9 @@ Pipeline (in order):
    Instructions or the synthetic row id column (``__agent_row_id__``) described above.
    Step-3 exemptions are **only** those two cases; do **not** infer exemptions from
    column names (e.g. ``*_id`` or ``employee_id``) or from treating a column as an
-   “identifier.” Dataset Summary does not flag ID-like columns; step 8 classifies
-   ID-like columns **in code** from the surviving ``df`` after steps 3 and 7. **Wrong:**
+   “identifier.” Dataset Summary does not flag row keys; step 8 identifies row
+   keys **in code** from the surviving ``df`` after steps 3 and 7, and **only**
+   to decide step-9 imputation skips (never for drops). **Wrong:**
    excluding a column from the step-3 drop list because its name ends with ``_id``.
    **Right:** drop whenever missing share **> 0.4** unless User Instructions
    explicitly name that column as protected or the column is ``__agent_row_id__``.
@@ -118,27 +119,30 @@ Pipeline (in order):
    `cols = [c for c in df.columns if ...]` recomputed after each drop). A common
    failure is dropping a high-missing column in step 3 then still referencing that
    name in step 9—**forbidden**; that causes `KeyError` at runtime.
-8. Identify **true row-key / ID-like** columns among those **still present after
-   steps 3 and 7**—this classification **never** overrides step 3 or 7. A column
-   with more than 40% missing **must** still be dropped in step 3 regardless of
-   its name; do **not** keep it because the name ends with ``id``. Treat a column as
-   ID-like **only if** it survived 3 and 7 **and** one of these holds: (a) non-null
-   values are **unique per row** (``nunique(dropna=True) == len(df)``) **and**
-   missing fraction is low enough that step 3 did not target it; (b) the column
-   is strictly monotonically increasing integers suitable as a surrogate key; or
-   (c) values look like UUIDs. **Do not** use the substring ``"id"`` in the column
-   name alone as sufficient signal (that catches ``employee_id``, ``valid_id``,
-   etc.). Exempt **only** these surviving ID-like columns from **step 9
-   (imputation)**. Do **not** drop them in step 9. They may still receive steps 4–6
-   when Dataset Summary flags apply.
+8. **Row keys (step 9 imputation skip only):** Among columns **still present after
+   steps 3 and 7**, treat a column as a **row key** if it is **not** the synthetic
+   row id column ``__agent_row_id__`` and **either** (a) every **non-null** value
+   is distinct (``df[col].notna().sum() > 0`` and
+   ``df[col].nunique(dropna=True) == df[col].notna().sum()``), **or** (b) non-null
+   values look like UUIDs, **or** (c) the column is strictly monotonically
+   increasing integers with unique non-null values. **Do not** use column-name
+   substrings (e.g. ``_id``) as sufficient signal. Row keys follow the same steps
+   4–7 as any other column and **must** still be dropped in step 3 when missing
+   share **> 0.4** (unless User Instructions or ``__agent_row_id__`` exempt them).
+   Row keys are **only** exempt from **step 9 fills**: **never** apply mean,
+   median, or mode ``fillna`` to a row key—leave any remaining missing values as
+   NaN (no invented tokens).
 9. Impute missing values (always assign back to df[col]):
-   - Numeric columns: compute skew_val = df[col].skew() (a SCALAR float). Use
-     the built-in abs(skew_val); NEVER call .abs() on the scalar
-     (Series.skew() returns a scalar, not a Series). If abs(skew_val) > 1
-     use df[col] = df[col].fillna(df[col].median()), else
-     df[col] = df[col].fillna(df[col].mean()).
+   - **Numeric columns** that are **not** row keys per step 8: compute
+     skew_val = df[col].skew() (a SCALAR float). Use the built-in abs(skew_val);
+     NEVER call .abs() on the scalar (Series.skew() returns a scalar, not a
+     Series). If abs(skew_val) > 1 use
+     ``df[col] = df[col].fillna(df[col].median())``, else
+     ``df[col] = df[col].fillna(df[col].mean())``.
+   - **Numeric row keys** per step 8: **do not** mean- or median-fill; leave
+     missing as NaN.
    - **String / object columns** (including nullable string dtypes) that are **not**
-     ID-like per step 8: **recompute** missing share on the **current** ``df``
+     row keys per step 8: **recompute** missing share on the **current** ``df``
      immediately before deciding on a mode fill (after steps 4–5; same NA /
      empty-stripped / placeholder semantics as step 3). **If** missing share
      ≤ 20% **and** ``df[col].mode().dropna()`` is non-empty, use
@@ -147,6 +151,8 @@ Pipeline (in order):
      entirely (no ``fillna`` for it). Otherwise **leave missing as NaN**—do
      **not** invent a synthetic sentinel such as ``"unknown"``, do **not**
      ``fillna("unknown")`` on label-like fields.
+   - **String / object row keys** per step 8: **do not** mode-fill; leave missing
+     as NaN.
    - **Do not** use ``pd.Categorical``, ``.astype("category")``, rare-frequency
      bucketing, literal ``"other"`` buckets, or companion snapshot columns that
      duplicate a base column for auditing in this pipeline, unless User
@@ -169,7 +175,7 @@ User Instructions:
 Dataset Summary:
 {all_datasets_summary}
 
-**Step 9 cheat sheet (string/object columns, not ID-exempt after step 8):**
+**Step 9 cheat sheet (string/object columns that are not row keys per step 8):**
 - Recompute **missing share** on the **current** ``df`` immediately before any mode-fill decision (after steps 4–5; same NA / empty-stripped / placeholder semantics as step 3).
 - **If** missing share ≤ 0.2 **and** ``df[col].mode().dropna()`` is non-empty → you **may** mode-fill in step 9.
 - **Else** → leave NaN; **must not** ``fillna`` that column in step 9.

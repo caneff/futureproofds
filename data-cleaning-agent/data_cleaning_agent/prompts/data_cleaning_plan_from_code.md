@@ -2,7 +2,7 @@
 
 The application appends the authoritative Python for ``def {function_name}(source_df):`` in a ```python``` fence **immediately after** this instruction text. Read that block first. Your JSON must **faithfully** describe what that Python does (including step 9 imputation vs leaving NaN on each column), not what you wish it did.
 
-**Step 9 vs JSON:** Infer from the appended Python whether each string/object column (not step-8 ID-exempt) receives a mode ``fillna`` or other imputation. List ``impute missing values (mode)`` (or mean/median as applicable) only when the code actually performs that fill; list ``retain missing values`` when the code leaves missing values unfilled in step 9 for that column yet it survives the pipeline with prior Dataset Summary missingness. Never list ``retain missing values`` for a column the code imputes in step 9.
+**Step 9 vs JSON:** Infer from the appended Python whether each string/object column that is **not** a step-8 row key receives a mode ``fillna`` or other imputation. List ``impute missing values (mode)`` (or mean/median as applicable) only when the code actually performs that fill; list ``retain missing values`` when the code leaves missing values unfilled in step 9 for that column yet it survives the pipeline with prior Dataset Summary missingness. Never list ``retain missing values`` for a column the code imputes in step 9.
 
 User Instructions:
 {user_instructions}
@@ -91,9 +91,11 @@ Plan JSON rules:
   `"strip whitespace"`. If no fill runs, prefer
   `"retain missing values"` over fake `"unknown"` imputation lines.
   **Input missingness → plan row:** If Dataset Summary shows **>0%** missing on a
-  column, treat that column as requiring an explicit **imputation** or
-  **retain missing values** action in JSON once it survives steps 3–7 and is not
-  step-8 ID-exempt—even when step 9 only *would* fill because of the mode rule, or
+  column and that column survives steps 3–7, the JSON **must** include either an
+  explicit imputation action or ``retain missing values`` when the Python leaves
+  missing values unfilled in step 9. Step-8 **row keys** never receive step-9
+  ``fillna``; when they still have missing values, list ``retain missing values``
+  (not a fake imputation line)—even when step 9 only *would* fill because of the mode rule, or
   when earlier steps (4–6) might change how missingness looks later. Do not ship a
   plan where such a column has only `"normalize name"` / `"strip whitespace"` /
   dtype lines and **neither** impute nor retain.
