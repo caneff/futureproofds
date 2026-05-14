@@ -36,141 +36,6 @@ _BOOL_LIKE_TOKENS = frozenset({
     "1",
 })
 
-# Full-cell tokens treated as missing for pipeline step 3 / 5 (``data_cleaning.md``).
-# Compared after strip + casefold; empty strip counts as missing separately.
-_CLEANING_PLACEHOLDER_TOKENS = frozenset({
-    "",
-    "n/a",
-    "na",
-    "null",
-    "none",
-    "?",
-    "missing",
-    "-",
-    "unknown",
-})
-
-
-def sparse_missing_mask(series: pd.Series) -> pd.Series:
-    """Boolean mask aligned with cleaning prompt step 3 (missing + blanks + tokens).
-
-    For numeric, boolean, and datetime columns, only ``pd.NA``/NaN/NaT count as
-    missing. For other dtypes (object, string, categorical), whitespace-only
-    cells and common placeholder strings (after strip + casefold) also count.
-    """
-    if len(series) == 0:
-        return pd.Series(False, index=series.index, dtype="boolean")
-    if pd.api.types.is_datetime64_any_dtype(series):
-        return series.isna()
-    if pd.api.types.is_bool_dtype(series) or pd.api.types.is_numeric_dtype(series):
-        return series.isna()
-    s = series.astype("string")
-    stripped = s.str.strip()
-    lowered = stripped.str.casefold()
-    return (
-        s.isna()
-        | stripped.isna()
-        | (stripped == "")
-        | lowered.isin(_CLEANING_PLACEHOLDER_TOKENS)
-    )
-
-
-def sparse_missing_share(series: pd.Series) -> float:
-    """Fraction of rows counted as missing under :func:`sparse_missing_mask`."""
-    if len(series) == 0:
-        return 0.0
-    return float(sparse_missing_mask(series).mean())
-
-
-def find_retained_high_missing_columns(
-    df_before: pd.DataFrame,
-    df_after: pd.DataFrame,
-    *,
-    threshold: float = 0.4,
-    protected: frozenset[str] | None = None,
-) -> list[str]:
-    """Input columns still in ``df_after`` that violate step 3 (high missing share).
-
-    Matches pipeline step 3 in ``data_cleaning.md``: any column whose
-    :func:`sparse_missing_share` on the **input** series is strictly greater than
-    ``threshold`` must be dropped before later steps, except labels in
-    ``protected`` (User / Supplemental instructions when the host wires them).
-
-    Used by :func:`apply_high_missing_column_enforcement` and unit tests.
-
-    Parameters
-    ----------
-    df_before, df_after
-        Input and output frames from a cleaning run (same logical dataset).
-    threshold
-        Strictly between 0 and 1; default ``0.4`` matches the prompt.
-    protected
-        Column labels to skip (never listed as violators).
-
-    Returns
-    -------
-    list[str]
-        Sorted column names still present in ``df_after`` that violate the rule.
-    """
-    if not 0.0 < threshold < 1.0:
-        raise ValueError("threshold must be strictly between 0 and 1")
-    skip = protected or frozenset()
-    out: list[str] = []
-    after_cols = set(df_after.columns)
-    for name in df_before.columns:
-        if name in skip or name not in after_cols:
-            continue
-        col = df_before[name]
-        if isinstance(col, pd.DataFrame):
-            col = col.iloc[:, 0]
-        if sparse_missing_share(col) > threshold:
-            out.append(str(name))
-    return sorted(out)
-
-
-def apply_high_missing_column_enforcement(
-    df_before: pd.DataFrame,
-    df_after: pd.DataFrame,
-    *,
-    threshold: float = 0.4,
-    protected: frozenset[str] | None = None,
-    row_id_col: str = APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN,
-) -> pd.DataFrame:
-    """Apply step-3 drops the generated cleaner omitted (missing share on input).
-
-    Step 3 is LLM-authored; this removes any column still present in ``df_after``
-    that exceeds ``threshold`` under :func:`sparse_missing_share` on
-    ``df_before``, except the host alignment column ``row_id_col`` and optional
-    ``protected`` names (same contract as the prompt's User / Supplemental lists).
-
-    Parameters
-    ----------
-    df_before
-        Frame passed into the generated cleaner.
-    df_after
-        Frame returned by the cleaner.
-    threshold
-        Same default as the prompt (strictly between 0 and 1).
-    protected
-        Column names never dropped when supplied by the host.
-    row_id_col
-        Synthetic row alignment column; never dropped here.
-    """
-    skip = frozenset({row_id_col}) | (protected or frozenset())
-    drop_names = find_retained_high_missing_columns(
-        df_before,
-        df_after,
-        threshold=threshold,
-        protected=skip,
-    )
-    if not drop_names:
-        return df_after
-    logger.info(
-        "Enforcing step-3 high-missing column drops absent from generated cleaner: %s",
-        drop_names,
-    )
-    return df_after.drop(columns=list(drop_names), errors="ignore")
-
 
 def normalize_cleaning_column_name(name: str) -> str:
     """
@@ -309,6 +174,23 @@ def removed_plan_actions(
     return sorted(out)
 
 
+def multiset_union_removed_plan_pairs(
+    left: list[tuple[str, str]],
+    right: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    """
+    Multiset sum of two ``(column, action)`` lists, sorted like :func:`removed_plan_actions`.
+
+    Used when plan-edit regeneration must remember **all** removals across successive
+    regens while ``plan_snapshot_for_code`` only tracks the last accepted plan.
+    """
+    c = Counter(left) + Counter(right)
+    out: list[tuple[str, str]] = []
+    for (col, act), n in sorted(c.items()):
+        out.extend([(col, act)] * n)
+    return out
+
+
 def sanitize_cleaning_plan(
     plan: dict[str, Any] | None, df: pd.DataFrame
 ) -> dict[str, Any] | None:
@@ -397,6 +279,7 @@ def sanitize_cleaning_plan(
         prev = str(out.get("notes") or "").strip()
         tag = " ".join(note_parts)
         out["notes"] = f"{tag} {prev}".strip() if prev else tag
+
     return out
 
 
@@ -537,9 +420,8 @@ class ColumnSummary:
     Attributes
     ----------
     missing_pct
-        Percent of rows missing under the same rules as pipeline step 3 in
-        ``data_cleaning.md`` (NaN/NA plus, for string-like columns, blanks and
-        common placeholder tokens after strip).
+        Percent of rows with ``pandas`` missing values only (``isna()`` on the
+        series as loaded).
     """
 
     name: str
@@ -723,7 +605,7 @@ def _summarize_column(name: str, series: pd.Series, n_rows: int) -> ColumnSummar
     return ColumnSummary(
         name=name,
         dtype=str(series.dtype),
-        missing_pct=round(sparse_missing_share(series) * 100, 2) if n_rows else 0.0,
+        missing_pct=round(float(series.isna().mean()) * 100, 2) if n_rows else 0.0,
         cardinality=cardinality,
         sample_values=_sample_values(series),
         numeric_stats=_numeric_stats(series) if is_numeric else None,
@@ -836,6 +718,52 @@ def format_dataframe_summary(summary: DataFrameSummary) -> str:
     return "\n".join(lines).rstrip()
 
 
+def plan_step9_policy_host_supplement(
+    df: pd.DataFrame,
+    *,
+    row_id_col: str = APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN,
+    max_columns_listed: int = 40,
+) -> str:
+    """
+    Host text appended to supplemental instructions so the model lists step 9.
+
+    Lists columns that already show pandas-missing values in ``df`` (via
+    :func:`get_dataframe_summary`) so the LLM must add either an imputation
+    action or ``retain missing values`` for survivors in the cleaning-plan JSON.
+    """
+    summary = get_dataframe_summary(df)
+    names: list[str] = []
+    for col in summary.columns.values():
+        if col.name == row_id_col:
+            continue
+        if col.missing_pct > 0.0:
+            names.append(col.name)
+    if not names:
+        return ""
+    shown = names[:max_columns_listed]
+    tail = ""
+    if len(names) > max_columns_listed:
+        tail = (
+            f" …and {len(names) - max_columns_listed} more column(s) with "
+            "missing values in this upload."
+        )
+    listed = ", ".join(f"`{n}`" for n in shown)
+    return (
+        "\n\n**Step 9 cleaning-plan JSON (mandatory):** This upload's Dataset Summary "
+        "shows **>0%** pandas-missing values before cleaning for: "
+        f"{listed}.{tail} For **each** such column that **remains** on ``df`` after "
+        "pipeline steps **3** and **7** and is **not** exempt from step **9** under your "
+        "step **8** ID-like rules, ``columns[].actions`` **must** include **either** "
+        '`"impute missing values (mean)"`, `"impute missing values (median)"`, '
+        '`"impute missing values (mode)"` **or** `"retain missing values"` '
+        "(whichever matches what step **9** actually does for that column). "
+        "Place that phrase among the per-column actions (typically after strip / "
+        "placeholder / dtype steps). Do **not** omit both; do **not** rely on "
+        "``notes`` alone for this obligation. Columns dropped in step 3 or 7 use "
+        "drop actions instead and are exempt."
+    )
+
+
 def execute_agent_code(
     state, data_key, code_snippet_key, result_key, error_key, agent_function_name
 ):
@@ -884,7 +812,6 @@ def execute_agent_code(
     try:
         result = agent_function(df)
         if isinstance(result, pd.DataFrame):
-            result = apply_high_missing_column_enforcement(df, result)
             result = result.to_dict()
     except KeyError as e:
         logger.error("Execution failed: %s", e)

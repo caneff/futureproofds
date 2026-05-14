@@ -41,6 +41,10 @@ Return **two** blocks in this exact order:
    strip steps.
    If the code leaves missing values unfilled on purpose, list
    ``"retain missing values"`` (or equivalent)—do not claim ``"impute missing values (unknown)"``.
+   If Dataset Summary showed **>0%** missing on a column before cleaning and that
+   column still exists after steps 3–7 and is not ID-exempt in step 8, the JSON
+   **must** still include either an explicit imputation line or
+   ``"retain missing values"`` for it—do not leave only strip/normalize/dtype lines.
    Preserve display casing on string labels (no forced lowercasing in step 4).
    Every ``columns[]`` row must list ``"normalize name"`` first when step 2 runs
    on the frame, including numeric columns. Each
@@ -58,5 +62,5 @@ Return **two** blocks in this exact order:
 Broken code:
 {code_snippet}
 
-Error:
+Error (may be a Python traceback **or** a host verification message such as retain-plan mismatch):
 {error}

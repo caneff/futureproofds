@@ -255,9 +255,27 @@ Plan JSON rules:
   only earlier steps like
   `"strip whitespace"`. If no fill runs, prefer
   `"retain missing values"` over fake `"unknown"` imputation lines.
+  **Input missingness → plan row:** If Dataset Summary shows **>0%** missing on a
+  column, treat that column as requiring an explicit **imputation** or
+  **retain missing values** action in JSON once it survives steps 3–7 and is not
+  step-8 ID-exempt—even when step 9 only *would* fill because of the mode rule, or
+  when earlier steps (4–6) might change how missingness looks later. Do not ship a
+  plan where such a column has only `"normalize name"` / `"strip whitespace"` /
+  dtype lines and **neither** impute nor retain.
+- **Hard rule:** If `columns[].actions` for a column includes `"retain missing values"`
+  (or an equivalent explicit retain), **step 9 and any imputation loop must not**
+  fill that column—no `fillna`, mode/mean/median fill, `bfill`/`ffill`, or `replace`
+  that reduces nulls on it. The Python must match the JSON; do not list retain and
+  then impute in code.
 - **Self-check before emitting JSON**: trace every `fillna` (and any NA-fill via
   `where`, `replace`, or mode/mean/median used as a fill) in your function; each
   target column must have the matching imputation phrase under `columns[].actions`.
+- The application compares **aligned** missing-value counts to the plan; if nulls
+  decrease on a column without any imputation-classified `actions` entry for that
+  column, the user sees a **warning**—treat that as a failed self-check and revise.
+  **Supplemental instructions** may repeat a host list of columns with upload-time
+  missingness: you **must** satisfy that list with matching `actions` (impute or
+  retain) for every listed column your pipeline still processes after drops.
 - `actions` is an array of short human-readable strings in **rough pipeline
   order** for that column (what happens to that column, step by step).
 - If no column-specific work: `"columns": []` and use `row_ops` / `notes`.

@@ -3,7 +3,7 @@
 import numpy as np
 import pandas as pd
 import pytest
-from cleaning_outcome_summary import (
+from data_cleaning_agent.cleaning_outcome_summary import (
     build_cleaning_outcome_facts,
     format_outcome_summary_markdown,
     outcome_facts_show_any_change,
@@ -12,13 +12,13 @@ from data_cleaning_agent.utils import APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN
 
 
 @pytest.mark.unit
-def test_dropped_column_tagged_step3_when_high_missing_on_input():
+def test_dropped_column_lists_drop_reason():
     df_before = pd.DataFrame({"a": range(10), "drop_me": ["", ""] * 5})
     df_after = df_before.drop(columns=["drop_me"])
     facts = build_cleaning_outcome_facts(df_before, df_after, row_id_col="__missing__")
     assert "drop_me" in facts["columns"]["dropped"]
     tags = {t["column"]: t["tag"] for t in facts["drop_reasons"]}
-    assert tags.get("drop_me") == "step_3_high_missing"
+    assert tags.get("drop_me") == "dropped"
 
 
 @pytest.mark.unit

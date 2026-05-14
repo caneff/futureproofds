@@ -1,13 +1,16 @@
 import math
 from unittest.mock import MagicMock
 
+import pandas as pd
 import pytest
 from data_cleaning_agent.utils import (
+    APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN,
     PythonOutputParser,
     execute_agent_code,
     fix_agent_code,
     format_dataframe_summary,
     get_dataframe_summary,
+    plan_step9_policy_host_supplement,
 )
 
 
@@ -151,7 +154,7 @@ class TestExecuteAgentCode:
         assert out["error"] is None
         assert out["result"] == {"a": {0: 1, 1: 2, 2: 3}, "b": {0: 2, 1: 4, 2: 6}}
 
-    def test_enforces_high_missing_employee_id_drop_when_cleaner_keeps_column(self):
+    def test_passes_through_columns_when_cleaner_returns_copy(self):
         state = {
             "data": {
                 "employee_id": ["", "", "", "", "", "", "", "", "", "E1"],
@@ -165,7 +168,7 @@ class TestExecuteAgentCode:
         assert out["error"] is None
         res = out["result"]
         assert res is not None
-        assert "employee_id" not in res
+        assert "employee_id" in res
         assert "x" in res
 
     def test_runtime_failure_captures_error_and_returns_none_result(self):
@@ -261,3 +264,17 @@ class TestFixAgentCode:
         )
 
         assert out["attempts"] == 3
+
+
+def test_plan_step9_policy_host_supplement_lists_columns_with_missingness() -> None:
+    rid = APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN
+    df = pd.DataFrame({rid: [0, 1], "city": ["London", None], "age": [1.0, 2.0]})
+    out = plan_step9_policy_host_supplement(df, row_id_col=rid)
+    assert "`city`" in out
+    assert "age" not in out
+    assert "impute missing values" in out or "retain missing values" in out
+
+
+def test_plan_step9_policy_host_supplement_empty_when_no_missing() -> None:
+    df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
+    assert plan_step9_policy_host_supplement(df, row_id_col="__unused__") == ""

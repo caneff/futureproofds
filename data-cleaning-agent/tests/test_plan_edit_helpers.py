@@ -4,8 +4,16 @@ import pytest
 from data_cleaning_agent.utils import (
     coerce_cleaning_plan_columns,
     merged_plan_actions_by_column,
+    multiset_union_removed_plan_pairs,
     removed_plan_actions,
 )
+
+
+def test_multiset_union_removed_plan_pairs_sorts_and_counts():
+    a = [("x", "1"), ("y", "2")]
+    b = [("x", "1"), ("z", "3")]
+    u = multiset_union_removed_plan_pairs(a, b)
+    assert u == [("x", "1"), ("x", "1"), ("y", "2"), ("z", "3")]
 
 
 def test_removed_plan_actions_basic():

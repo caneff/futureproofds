@@ -6,17 +6,16 @@ import logging
 from typing import Any
 
 import pandas as pd
-from data_cleaning_agent.utils import (
+from pandas.api.types import is_dtype_equal
+
+from .utils import (
     APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN,
     first_column_as_series,
-    sparse_missing_share,
     summarize_cleaning_row_effects,
 )
-from pandas.api.types import is_dtype_equal
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_HIGH_MISSING = 0.4
 DEFAULT_NULL_TOP_K = 10
 
 
@@ -38,12 +37,12 @@ def _series_equal_ignoring_dtype(left: pd.Series, right: pd.Series) -> bool:
         return False
     if left.equals(right):
         return True
-    l = left.reset_index(drop=True)
-    r = right.reset_index(drop=True)
+    left_pos = left.reset_index(drop=True)
+    right_pos = right.reset_index(drop=True)
     try:
         pd.testing.assert_series_equal(
-            l,
-            r,
+            left_pos,
+            right_pos,
             check_dtype=False,
             check_names=False,
         )
@@ -58,7 +57,6 @@ def build_cleaning_outcome_facts(
     df_after: pd.DataFrame,
     *,
     row_id_col: str,
-    high_missing_threshold: float = DEFAULT_HIGH_MISSING,
     null_top_k: int = DEFAULT_NULL_TOP_K,
 ) -> dict[str, Any]:
     """Build JSON-serializable facts comparing ``df_before`` to ``df_after``.
@@ -69,14 +67,10 @@ def build_cleaning_outcome_facts(
         Input and output of the same cleaner run.
     row_id_col
         Synthetic alignment column (e.g. ``preview_helpers.AGENT_ROW_ID``).
-    high_missing_threshold
-        Same default as pipeline step 3 in ``data_cleaning.md``.
     null_top_k
         Max number of shared columns to list in ``null_deltas`` by absolute
         change in raw ``isna()`` count.
     """
-    if not 0.0 < high_missing_threshold < 1.0:
-        raise ValueError("high_missing_threshold must be strictly between 0 and 1")
     if null_top_k < 1:
         raise ValueError("null_top_k must be at least 1")
 
@@ -119,13 +113,9 @@ def build_cleaning_outcome_facts(
     null_deltas.sort(key=lambda r: abs(r["delta"]), reverse=True)
     null_deltas = null_deltas[:null_top_k]
 
-    drop_reasons: list[dict[str, str]] = []
-    for col in dropped:
-        col_s = first_column_as_series(df_before, col)
-        if sparse_missing_share(col_s) > high_missing_threshold:
-            drop_reasons.append({"column": col, "tag": "step_3_high_missing"})
-        else:
-            drop_reasons.append({"column": col, "tag": "dropped"})
+    drop_reasons: list[dict[str, str]] = [
+        {"column": col, "tag": "dropped"} for col in dropped
+    ]
 
     aligned = row_id_col in df_before.columns and row_id_col in df_after.columns
     rows: dict[str, Any] = {
@@ -163,7 +153,7 @@ def build_cleaning_outcome_facts(
 
 
 def outcome_facts_show_any_change(facts: dict[str, Any]) -> bool:
-    """True when before/after differ in shape, columns, dtypes, nulls, or enforced drops."""
+    """True when before/after differ in shape, columns, dtypes, nulls, or drop tags."""
     rows = facts.get("rows") or {}
     if int(rows.get("n_before", 0)) != int(rows.get("n_after", 0)):
         return True
@@ -222,9 +212,7 @@ def format_outcome_summary_markdown(facts: dict[str, Any]) -> str:
         lines.append("")
         lines.append("**Dropped Columns (Tags)**")
         tag_text = {
-            "step_3_high_missing": "matches pipeline step 3 "
-            "(input missing share > 40%)",
-            "dropped": "dropped on output (other reason than high-missing rule)",
+            "dropped": "column absent on cleaned output compared to upload",
         }
         for item in dr:
             tag = item.get("tag", "dropped")
