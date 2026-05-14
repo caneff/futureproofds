@@ -385,16 +385,42 @@ class DataFrameSummary:
     columns: dict[str, ColumnSummary]
 
 
+def _extract_python_fenced_block(text: str) -> str | None:
+    """Return the body of the first `` ```python `` … `` ``` `` region, or ``None``.
+
+    The closing fence must be on its own line (optional surrounding whitespace only).
+    This avoids truncating on `` ``` `` that appear inside a line—e.g.
+    ``example = "```"``—which breaks naive non-greedy ``(.*?)``` `` matching and
+    yields invalid Python (often ``SyntaxError: unmatched ')'`` at a later line).
+    """
+    start_m = re.search(r"```\s*python\s*", text, flags=re.IGNORECASE)
+    if not start_m:
+        return None
+    pos = start_m.end()
+    while pos < len(text) and text[pos] in "\r\n":
+        pos += 1
+    rest = text[pos:]
+    lines = rest.splitlines(keepends=True)
+    body_parts: list[str] = []
+    for line in lines:
+        if re.fullmatch(r"\s*```\s*", line.rstrip("\r\n")):
+            return "".join(body_parts).rstrip("\r\n")
+        body_parts.append(line)
+    # No line-final closing fence (legacy / malformed): fall back to first ``` anywhere.
+    legacy = re.search(r"(.*?)```", rest, flags=re.DOTALL)
+    if legacy:
+        return legacy.group(1).strip()
+    return rest.rstrip("\r\n")
+
+
 class PythonOutputParser(BaseOutputParser):
     """Extract Python code from LLM responses."""
 
     def parse(self, text: str):
         """Extract code from ```python``` blocks or return text as-is."""
-        python_code_match = re.search(
-            r"```python(.*?)```", text, re.DOTALL | re.IGNORECASE
-        )
-        if python_code_match:
-            return python_code_match.group(1).strip()
+        extracted = _extract_python_fenced_block(text)
+        if extracted is not None:
+            return extracted.strip()
         return text
 
 
@@ -438,11 +464,9 @@ class DataCleaningOutputParser(BaseOutputParser):
         dict
             Keys: ``code`` (str), ``cleaning_plan`` (dict or None if missing/invalid).
         """
-        python_code_match = re.search(
-            r"```python(.*?)```", text, re.DOTALL | re.IGNORECASE
-        )
-        if python_code_match:
-            code = python_code_match.group(1).strip()
+        extracted = _extract_python_fenced_block(text)
+        if extracted is not None:
+            code = extracted.strip()
         else:
             code = text.strip()
 

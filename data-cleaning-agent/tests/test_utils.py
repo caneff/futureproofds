@@ -131,6 +131,14 @@ class TestPythonOutputParser:
                 id="fenced-with-prose",
             ),
             pytest.param("no fences here", "no fences here", id="passthrough"),
+            pytest.param(
+                "```python\ndef data_cleaner(source_df):\n"
+                '    example = "```"\n'
+                "    return source_df\n"
+                "```\n",
+                'def data_cleaner(source_df):\n    example = "```"\n    return source_df',
+                id="fence-with-triple-backticks-in-string",
+            ),
         ],
     )
     def test_extracts_or_passes_through(self, text, expected):

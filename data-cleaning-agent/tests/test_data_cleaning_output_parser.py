@@ -62,3 +62,21 @@ def f(d):
 """
     out = DataCleaningOutputParser().parse(text)
     assert out["cleaning_plan"] is None
+
+
+@pytest.mark.unit
+def test_parser_python_fence_ignores_triple_backticks_inside_line():
+    text = """```python
+def data_cleaner(source_df):
+    example = "```"
+    return source_df.copy()
+```
+
+```json
+{"columns": [], "row_ops": [], "notes": ""}
+```
+"""
+    out = DataCleaningOutputParser().parse(text)
+    assert 'example = "```"' in out["code"]
+    assert "return source_df.copy()" in out["code"]
+    assert out["cleaning_plan"] is not None
