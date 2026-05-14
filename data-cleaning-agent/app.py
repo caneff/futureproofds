@@ -84,14 +84,17 @@ if uploaded_file:
             )
             st.session_state["preview_df_input"] = df_input
             st.session_state.pop("preview_df_cleaned", None)
-        st.success("Cleaning code generated. Review it below, then apply when ready.")
+        st.success(
+            "Cleaning code generated. Expand the cleaning code section below to "
+            "review, then apply when ready."
+        )
 
     pending_code = st.session_state.get("pending_cleaner_code")
     df_input_stored = st.session_state.get("preview_df_input")
 
     if pending_code and df_input_stored is not None:
-        st.subheader("Generated cleaning code")
-        st.code(pending_code, language="python")
+        with st.expander("Generated cleaning code", expanded=False):
+            st.code(pending_code, language="python")
 
         if st.button("Apply Cleaning"):
             apply_err: str | None = None
