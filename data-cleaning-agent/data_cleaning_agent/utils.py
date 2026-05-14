@@ -36,6 +36,74 @@ def _agent_debug_ndjson(payload: dict) -> None:
 # Keep identical; omit from user-facing cleaning plans.
 APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN = "__agent_row_id__"
 
+
+def sanitize_generated_cleaner_drop_exemptions(
+    code: str,
+    user_instructions: str | None,
+) -> str:
+    """
+    Remove hard-coded ``employee_id`` paired with the synthetic row id in drop exemptions.
+
+    The cleaning LLM sometimes lists ``employee_id`` next to ``__agent_row_id__`` in
+    ``.difference([...])`` (or similar) even when User Instructions do not name that
+    column as protected. When ``employee_id`` appears in User Instructions
+    (case-insensitive), the code is left unchanged.
+    """
+    if not code:
+        return code
+    if "employee_id" in (user_instructions or "").lower():
+        return code
+
+    rid = re.escape(APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN)
+
+    def _list_agent_first(m: re.Match) -> str:
+        q = m.group(1)
+        return f"[{q}{APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN}{q}]"
+
+    def _list_eid_first(m: re.Match) -> str:
+        q = m.group(1)
+        return f"[{q}{APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN}{q}]"
+
+    def _set_pair(m: re.Match) -> str:
+        q = m.group(1)
+        return "{" + f"{q}{APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN}{q}" + "}"
+
+    def _pd_index_pair(m: re.Match) -> str:
+        q = m.group(1)
+        return f"pd.Index([{q}{APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN}{q}])"
+
+    subs: tuple[tuple[str, Any], ...] = (
+        (
+            rf"\[\s*([\"']){rid}\1\s*,\s*\1employee_id\1\s*\]",
+            _list_agent_first,
+        ),
+        (
+            rf"\[\s*([\"'])employee_id\1\s*,\s*\1{rid}\1\s*\]",
+            _list_eid_first,
+        ),
+        (
+            rf"\{{\s*([\"']){rid}\1\s*,\s*\1employee_id\1\s*\}}",
+            _set_pair,
+        ),
+        (
+            rf"\{{\s*([\"'])employee_id\1\s*,\s*\1{rid}\1\s*\}}",
+            _set_pair,
+        ),
+        (
+            rf"pd\.Index\(\[\s*([\"']){rid}\1\s*,\s*\1employee_id\1\s*\]\)",
+            _pd_index_pair,
+        ),
+        (
+            rf"pd\.Index\(\[\s*([\"'])employee_id\1\s*,\s*\1{rid}\1\s*\]\)",
+            _pd_index_pair,
+        ),
+    )
+    out = code
+    for pat, repl in subs:
+        out = re.sub(pat, repl, out)
+    return out
+
+
 # int()/tolist() when building row-id sets — use a bound tuple so formatters cannot
 # rewrite ``except (TypeError, ValueError)`` into the comma form (wrong semantics).
 _EXC_ROW_ID_SET_COERCION = (TypeError, ValueError)
@@ -825,6 +893,12 @@ def fix_agent_code(
             out["cleaning_plan"] = response["cleaning_plan"]
     else:
         out[code_snippet_key] = response
+
+    _fk = out.get(code_snippet_key)
+    if isinstance(_fk, str):
+        out[code_snippet_key] = sanitize_generated_cleaner_drop_exemptions(
+            _fk, state.get("user_instructions")
+        )
 
     # #region agent log
     fixed = out.get(code_snippet_key)

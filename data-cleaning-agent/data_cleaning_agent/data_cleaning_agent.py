@@ -21,6 +21,7 @@ from .utils import (
     get_dataframe_summary,
     parse_json_plan_block,
     sanitize_cleaning_plan,
+    sanitize_generated_cleaner_drop_exemptions,
 )
 
 # Setup
@@ -203,6 +204,16 @@ def _run_data_cleaning_generation(
                     "employee_id"
                 ),
             },
+        }
+    )
+    code = sanitize_generated_cleaner_drop_exemptions(code, user_instructions)
+    _agent_debug_ndjson(
+        {
+            "hypothesisId": "H6",
+            "runId": "post-sanitize",
+            "location": "data_cleaning_agent.py:_run_data_cleaning_generation",
+            "message": "after_sanitize_code_scan",
+            "data": _dbg_scan_generated(code),
         }
     )
     # #endregion

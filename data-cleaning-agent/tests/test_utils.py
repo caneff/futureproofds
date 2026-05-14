@@ -10,6 +10,7 @@ from data_cleaning_agent.utils import (
     format_dataframe_summary,
     get_dataframe_summary,
     run_cleaner_code_on_dataframe,
+    sanitize_generated_cleaner_drop_exemptions,
 )
 
 
@@ -81,6 +82,45 @@ class TestGetDataFrameSummary:
 
     def test_boolean_like_false_when_cardinality_above_two(self, summary):
         assert summary.columns["country"].looks_boolean_like is False
+
+
+@pytest.mark.unit
+class TestSanitizeGeneratedCleanerDropExemptions:
+    """Strip spurious ``employee_id`` from step-3 drop exemption literals."""
+
+    _BAD_LINE = (
+        "cols_to_drop = missing_share[missing_share > 0.4].index.difference("
+        "['__agent_row_id__', 'employee_id'])"
+    )
+
+    def test_removes_employee_id_when_not_in_user_instructions(self):
+        out = sanitize_generated_cleaner_drop_exemptions(
+            self._BAD_LINE, "Follow the basic cleaning steps."
+        )
+        assert "employee_id" not in out
+        assert "['__agent_row_id__']" in out
+
+    def test_removes_when_user_instructions_is_none(self):
+        out = sanitize_generated_cleaner_drop_exemptions(self._BAD_LINE, None)
+        assert "employee_id" not in out
+
+    def test_preserves_when_user_instructions_name_employee_id(self):
+        out = sanitize_generated_cleaner_drop_exemptions(
+            self._BAD_LINE, "Do not drop employee_id"
+        )
+        assert "employee_id" in out
+
+    def test_rewrites_swapped_literal_order(self):
+        line = "x = foo.difference(['employee_id', '__agent_row_id__'])"
+        out = sanitize_generated_cleaner_drop_exemptions(line, "")
+        assert "employee_id" not in out
+        assert "'__agent_row_id__'" in out
+
+    def test_rewrites_pd_index_pair(self):
+        line = "d = pd.Index(['__agent_row_id__', 'employee_id'])"
+        out = sanitize_generated_cleaner_drop_exemptions(line, "")
+        assert "employee_id" not in out
+        assert "pd.Index(['__agent_row_id__'])" in out
 
 
 @pytest.mark.unit
