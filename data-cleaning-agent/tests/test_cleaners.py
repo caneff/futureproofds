@@ -288,3 +288,55 @@ def test_replace_placeholders_with_na(
         check_dtype=False,
         check_column_type=False,
     )
+
+
+@pytest.mark.unit
+def test_coerce_datetime_columns_parses_strings_and_skips_missing_labels() -> None:
+    df = pd.DataFrame({
+        "d": ["2020-01-01", "not a date", "2021-12-31"],
+        "x": [1, 2, 3],
+    })
+    out = cleaners.coerce_datetime_columns(df, ["d", "ghost"])
+    assert pd.api.types.is_datetime64_any_dtype(out["d"])
+    assert pd.isna(out["d"].iloc[1])
+    assert not pd.isna(out["d"].iloc[0])
+    assert out["x"].tolist() == [1, 2, 3]
+    assert df["d"].dtype == object
+
+
+@pytest.mark.unit
+def test_coerce_numeric_columns_strips_currency_and_skips_non_targets() -> None:
+    df = pd.DataFrame({
+        "money": ["$1,234.5%", np.nan, "42"],
+        "n": [1, 2, 3],
+        "s": ["a", "b", "c"],
+    })
+    out = cleaners.coerce_numeric_columns(df, ["money", "n", "ghost"])
+    assert out["money"].iloc[0] == pytest.approx(1234.5)
+    assert pd.isna(out["money"].iloc[1])
+    assert out["money"].iloc[2] == pytest.approx(42.0)
+    assert out["n"].tolist() == [1, 2, 3]
+    assert out["s"].tolist() == ["a", "b", "c"]
+
+
+@pytest.mark.unit
+def test_coerce_numeric_columns_leaves_datetime_column_unchanged() -> None:
+    df = pd.DataFrame({"dt": pd.to_datetime(["2020-01-01", "2020-06-15"])})
+    out = cleaners.coerce_numeric_columns(df, ["dt"])
+    pd.testing.assert_series_equal(out["dt"], df["dt"], check_dtype=True)
+
+
+@pytest.mark.unit
+def test_coerce_bool_columns_maps_tokens_and_unknown_to_na() -> None:
+    df = pd.DataFrame({
+        "b": ["Yes", "NO", " t ", "maybe", np.nan],
+        "x": [1, 2, 3, 4, 5],
+    })
+    out = cleaners.coerce_bool_columns(df, ["b", "ghost"])
+    expected_b = pd.Series(
+        [True, False, True, pd.NA, pd.NA],
+        dtype="boolean",
+        name="b",
+    )
+    pd.testing.assert_series_equal(out["b"], expected_b, check_dtype=True)
+    assert out["x"].tolist() == [1, 2, 3, 4, 5]

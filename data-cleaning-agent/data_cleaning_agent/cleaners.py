@@ -28,6 +28,13 @@ _PLACEHOLDER_TOKENS: tuple[str, ...] = (
 # for :func:`missing_share` blank handling via ``treat_blank_as_missing``.
 _DEFAULT_PLACEHOLDER_REPLACE_TOKENS: tuple[str, ...] = ("",) + _PLACEHOLDER_TOKENS
 
+# Step 6 in ``data_cleaning.md``: strip currency/percent/thousands markers before ``to_numeric``.
+_NUMERIC_CURRENCY_STRIP_PATTERN = r"[$,%]"
+
+# Casefolded tokens mapped to True / False (aligned with step 6 and boolean detection elsewhere).
+_TRUE_BOOL_TOKENS: frozenset[str] = frozenset({"yes", "true", "t", "y", "1"})
+_FALSE_BOOL_TOKENS: frozenset[str] = frozenset({"no", "false", "f", "n", "0"})
+
 
 def _target_columns(
     df: pd.DataFrame, cols: Iterable[Hashable] | None
@@ -261,28 +268,146 @@ def replace_placeholders_with_na(
     return out
 
 
+def _coerce_numeric_series(s: pd.Series) -> pd.Series:
+    if pd.api.types.is_numeric_dtype(s):
+        return cast(pd.Series, pd.to_numeric(s, errors="coerce"))
+    if pd.api.types.is_object_dtype(s) or pd.api.types.is_string_dtype(s):
+        cleaned = cast(
+            pd.Series,
+            s.astype("string").str.replace(
+                _NUMERIC_CURRENCY_STRIP_PATTERN,
+                "",
+                regex=True,
+            ),
+        )
+        return cast(pd.Series, pd.to_numeric(cleaned, errors="coerce"))
+    return s
+
+
+def _series_to_nullable_bool(s: pd.Series) -> pd.Series:
+    if pd.api.types.is_bool_dtype(s):
+        return cast(pd.Series, s.astype("boolean"))
+    if not (pd.api.types.is_object_dtype(s) or pd.api.types.is_string_dtype(s)):
+        return s
+    strv = cast(
+        pd.Series,
+        s.astype("string").str.strip().str.casefold(),
+    )
+    true_m = strv.isin(_TRUE_BOOL_TOKENS)
+    false_m = strv.isin(_FALSE_BOOL_TOKENS)
+    out = pd.Series(pd.NA, index=s.index, dtype="boolean")
+    return out.mask(true_m, True).mask(false_m, False)
+
+
+def _to_datetime_mixed(s: pd.Series) -> pd.Series:
+    return cast(
+        pd.Series,
+        pd.to_datetime(s, errors="coerce", format="mixed"),
+    )
+
+
 def coerce_datetime_columns(
     df: pd.DataFrame,
     columns: Iterable[Hashable],
 ) -> pd.DataFrame:
-    """Apply ``pd.to_datetime(..., errors='coerce')`` only to the named columns."""
-    ...
+    """Parse named columns to datetimes (step 6 ``date_like`` path).
+
+    Each listed column is passed through ``pd.to_datetime(..., errors="coerce",
+    format="mixed")`` so heterogeneous date strings parse without noisy format
+    warnings on pandas 2.x. Values that cannot parse become ``NaT``.
+
+    Labels in ``columns`` that are not on ``df`` are ignored. Duplicate column
+    labels on ``df`` are not supported; behavior is undefined.
+
+    Parameters
+    ----------
+    df
+        Input frame (not mutated).
+    columns
+        Names to coerce that exist on ``df``; others are ignored.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A copy of ``df`` with the listed columns coerced to datetime64 where
+        possible.
+    """
+    out = df.copy()
+    present = out.columns.intersection(columns)
+    if present.empty:
+        return out
+    out[present] = out[present].apply(_to_datetime_mixed, axis=0)
+    return out
 
 
 def coerce_numeric_columns(
     df: pd.DataFrame,
     columns: Iterable[Hashable],
 ) -> pd.DataFrame:
-    """Coerce named columns to numeric after optional currency/percent stripping."""
-    ...
+    """Coerce named columns to numeric after optional currency/percent stripping.
+
+    Matches cleaning prompt step 6 for ``numeric_string_like`` columns: for
+    ``object`` / pandas ``string`` dtypes, strip dollar sign, comma, and percent
+    using the raw-string regex :data:`_NUMERIC_CURRENCY_STRIP_PATTERN`, then
+    ``pd.to_numeric(..., errors="coerce")``. Columns that are already numeric
+    receive ``to_numeric`` only (no ``.str`` accessor). Other dtypes are left
+    unchanged. Unknown column labels are ignored.
+
+    Duplicate column labels on ``df`` are not supported; behavior is undefined.
+
+    Parameters
+    ----------
+    df
+        Input frame (not mutated).
+    columns
+        Names to coerce that exist on ``df``; others are ignored.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A copy of ``df`` with applicable columns coerced to numeric dtypes.
+    """
+    out = df.copy()
+    present = out.columns.intersection(columns)
+    if present.empty:
+        return out
+    out[present] = out[present].apply(_coerce_numeric_series, axis=0)
+    return out
 
 
 def coerce_bool_columns(
     df: pd.DataFrame,
     columns: Iterable[Hashable],
 ) -> pd.DataFrame:
-    """Map boolean-like tokens in named columns to bool dtype."""
-    ...
+    """Map boolean-like tokens in named columns to nullable boolean dtype.
+
+    After strip and casefold, tokens in :data:`_TRUE_BOOL_TOKENS` become ``True``
+    and tokens in :data:`_FALSE_BOOL_TOKENS` become ``False`` (aligned with step
+    6 and boolean-like detection elsewhere). Other non-null strings become
+    ``pd.NA``. Null inputs remain null. Columns already boolean are cast to
+    nullable ``boolean``. Non string-like, non-bool dtypes are unchanged.
+    Unknown column labels are ignored.
+
+    Duplicate column labels on ``df`` are not supported; behavior is undefined.
+
+    Parameters
+    ----------
+    df
+        Input frame (not mutated).
+    columns
+        Names to coerce that exist on ``df``; others are ignored.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A copy of ``df`` with applicable columns as nullable booleans.
+    """
+    out = df.copy()
+    present = out.columns.intersection(columns)
+    if present.empty:
+        return out
+    out[present] = out[present].apply(_series_to_nullable_bool, axis=0)
+    return out
 
 
 def drop_constant_columns(
