@@ -415,8 +415,34 @@ def drop_constant_columns(
     *,
     exclude: Iterable[Hashable] = (),
 ) -> pd.DataFrame:
-    """Drop columns with a single unique non-null value."""
-    ...
+    """Drop columns with exactly one distinct non-null value.
+
+    Matches cleaning prompt step 7 for **constant** columns: ``nunique(dropna=True)
+    == 1``. Columns that are entirely NA (``nunique == 0``) are not removed here;
+    use :func:`drop_all_null_columns` instead.
+
+    Columns listed in ``exclude`` are never dropped. ``exclude`` entries that are
+    not column labels on ``df`` are ignored.
+
+    Duplicate column labels on ``df`` are not supported; behavior is undefined.
+
+    Parameters
+    ----------
+    df
+        Input frame (not mutated).
+    exclude
+        Column names to keep even when constant.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A new frame with constant columns removed.
+    """
+    nu = cast(pd.Series, df.nunique(dropna=True))
+    is_constant = nu.eq(1)
+    drop_mask = is_constant & ~is_constant.index.isin(exclude)
+    to_drop = drop_mask[drop_mask].index.tolist()
+    return df.drop(columns=to_drop)
 
 
 def drop_all_null_columns(
@@ -424,8 +450,35 @@ def drop_all_null_columns(
     *,
     exclude: Iterable[Hashable] = (),
 ) -> pd.DataFrame:
-    """Drop columns that are entirely NA."""
-    ...
+    """Drop columns where every row is NA.
+
+    Matches cleaning prompt step 7 for **100% missing** columns. When ``df`` has
+    zero rows, returns a copy with no columns removed (``isna().all`` would
+    otherwise be vacuously true for every column).
+
+    Columns listed in ``exclude`` are never dropped. ``exclude`` entries that are
+    not column labels on ``df`` are ignored.
+
+    Duplicate column labels on ``df`` are not supported; behavior is undefined.
+
+    Parameters
+    ----------
+    df
+        Input frame (not mutated).
+    exclude
+        Column names to keep even when all-null.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A new frame with all-null columns removed.
+    """
+    if len(df) == 0:
+        return df.copy()
+    all_na = cast(pd.Series, df.isna().all(axis=0))
+    drop_mask = all_na & ~all_na.index.isin(exclude)
+    to_drop = drop_mask[drop_mask].index.tolist()
+    return df.drop(columns=to_drop)
 
 
 def impute_numeric_median_or_mean(
@@ -452,11 +505,6 @@ def safe_assign_series(
     values: pd.Series,
 ) -> pd.DataFrame:
     """Assign a like-indexed series to ``df[col]`` without mutating the caller."""
-    ...
-
-
-def reset_index_drop(df: pd.DataFrame) -> pd.DataFrame:
-    """``reset_index(drop=True)`` wrapper."""
     ...
 
 

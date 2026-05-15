@@ -340,3 +340,75 @@ def test_coerce_bool_columns_maps_tokens_and_unknown_to_na() -> None:
     )
     pd.testing.assert_series_equal(out["b"], expected_b, check_dtype=True)
     assert out["x"].tolist() == [1, 2, 3, 4, 5]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "df,exclude,expected_columns",
+    [
+        pytest.param(
+            pd.DataFrame(
+                {"c": [7, 7, 7], "v": [1, 2, 1], "n": [1.0, np.nan, 1.0]},
+            ),
+            (),
+            ["v"],
+            id="single_non_null_level",
+        ),
+        pytest.param(
+            pd.DataFrame({"keep": [1, 1], "drop": [2, 2]}),
+            ("keep", "ghost"),
+            ["keep"],
+            id="exclude_keeps_constant_unknown_exclude_ignored",
+        ),
+    ],
+)
+def test_drop_constant_columns(
+    df: pd.DataFrame,
+    exclude: tuple[str, ...],
+    expected_columns: list[str],
+) -> None:
+    out = cleaners.drop_constant_columns(df, exclude=exclude)
+    assert list(out.columns) == expected_columns
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "df,exclude,expected_columns,expect_copy_not_identity",
+    [
+        pytest.param(
+            pd.DataFrame(
+                {
+                    "all_nan": [np.nan, np.nan],
+                    "ok": [1.0, 2.0],
+                    "prot": [np.nan, np.nan],
+                },
+            ),
+            ("prot",),
+            ["ok", "prot"],
+            False,
+            id="drops_all_nan_respects_exclude",
+        ),
+        pytest.param(
+            pd.DataFrame(
+                {
+                    "a": pd.Series([], dtype=float),
+                    "b": pd.Series([], dtype=float),
+                },
+            ),
+            (),
+            ["a", "b"],
+            True,
+            id="zero_rows_returns_copy_columns_unchanged",
+        ),
+    ],
+)
+def test_drop_all_null_columns(
+    df: pd.DataFrame,
+    exclude: tuple[str, ...],
+    expected_columns: list[str],
+    expect_copy_not_identity: bool,
+) -> None:
+    out = cleaners.drop_all_null_columns(df, exclude=exclude)
+    assert list(out.columns) == expected_columns
+    if expect_copy_not_identity:
+        assert out is not df
