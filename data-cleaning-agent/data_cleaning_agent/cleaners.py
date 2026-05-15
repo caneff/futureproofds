@@ -24,6 +24,62 @@ _PLACEHOLDER_TOKENS: tuple[str, ...] = (
 )
 
 
+def _target_columns(
+    df: pd.DataFrame, cols: Iterable[Hashable] | None
+) -> list[Hashable]:
+    """Return column labels to use; when ``cols`` is None, use ``df.columns`` order."""
+    return list(df.columns if cols is None else cols)
+
+
+def strip_strings(
+    df: pd.DataFrame,
+    cols: Iterable[Hashable] | None = None,
+    *,
+    exclude: Iterable[Hashable] = (),
+) -> pd.DataFrame:
+    """Strip leading/trailing whitespace on object/string columns only.
+
+    Matches cleaning prompt step 4: only ``object`` / pandas string dtypes are
+    updated with ``.str.strip()``; casing is unchanged. Columns in ``exclude``
+    are not modified. ``exclude`` entries that are not column labels are
+    ignored.
+
+    Duplicate column labels on ``df`` are not supported; behavior is undefined.
+
+    Parameters
+    ----------
+    df
+        Input frame (not mutated).
+    cols
+        Columns to consider for stripping; default is all columns. Columns
+        outside this list are unchanged. Non-string-like dtypes in the slice
+        are skipped.
+    exclude
+        Column names to leave unchanged (even if string-like and in ``cols``).
+
+    Returns
+    -------
+    pandas.DataFrame
+        A copy of ``df`` with stripped values where applicable.
+    """
+    out = df.copy()
+    work = df.reindex(columns=_target_columns(df, cols))
+    str_work = work.select_dtypes(include=["object", "string"])
+    if str_work.shape[1] == 0:
+        return out
+    stripped = cast(
+        pd.DataFrame,
+        str_work.astype("string").apply(
+            lambda s: s.str.strip(),
+            axis=0,
+        ),
+    )
+    eligible = stripped.columns[~stripped.columns.isin(set(exclude))]
+    if eligible.shape[0] > 0:
+        out[eligible] = stripped[eligible]
+    return out
+
+
 def _normalize_single_column_name(name: Hashable) -> str:
     """Lowercase, strip, map runs of non-``\\w`` characters to a single underscore."""
     s = str(name).strip().lower()
@@ -53,7 +109,9 @@ def missing_share(
     string columns, values equal to stripped placeholders from the cleaning
     prompt (for example ``N/A``, ``null``, or ``-``) also count. When
     ``treat_blank_as_missing`` is true, a stripped empty string (including
-    whitespace-only cells) counts as missing.
+    whitespace-only cells) counts as missing. Stripped values for those checks
+    come from :func:`strip_strings` with ``exclude=()`` (same step-4 strip as the
+    public helper; builds a full copy of ``df``).
 
     Duplicate column labels on ``df`` are not supported; behavior is undefined.
 
@@ -73,25 +131,22 @@ def missing_share(
         Float shares indexed like ``cols`` (or ``df.columns`` when ``cols`` is
         None). If ``df`` has zero rows, every value is NaN.
     """
-    target_cols = list(df.columns) if cols is None else list(cols)
+    target_cols = _target_columns(df, cols)
     work = df.reindex(columns=target_cols)
-    n = len(work)
-    if n == 0:
+    if len(work) == 0:
         return pd.Series({c: float("nan") for c in target_cols}, dtype="float64")
 
     mask = work.isna()
-    str_work = work.select_dtypes(include=["object", "string"])
-    if str_work.shape[1] > 0:
-        stripped = str_work.astype("string").apply(
-            lambda s: s.str.strip(),
-            axis=0,
+    str_only_raw = work.reindex(columns=work.columns).select_dtypes(
+        include=["object", "string"],
+    )
+    str_only = strip_strings(str_only_raw, cols=cols, exclude=())
+
+    if str_only.shape[1] > 0:
+        str_bad = str_only.isin(_PLACEHOLDER_TOKENS) | (
+            treat_blank_as_missing & str_only.eq("")
         )
-        str_bad = stripped.isin(_PLACEHOLDER_TOKENS) | (
-            treat_blank_as_missing & stripped.eq("")
-        )
-        str_full = pd.DataFrame(False, index=work.index, columns=work.columns)
-        str_full[str_bad.columns] = str_bad
-        mask = mask | str_full
+        mask = mask | str_bad.reindex(columns=work.columns, fill_value=False)
 
     return cast(pd.Series, mask.mean(axis=0))
 
@@ -133,16 +188,6 @@ def drop_columns_by_missing(
     drop_mask = (shares >= threshold) & ~shares.index.isin(exclude_set)
     to_drop = shares.loc[drop_mask].index.tolist()
     return df.drop(columns=to_drop)
-
-
-def strip_strings(
-    df: pd.DataFrame,
-    cols: Iterable[Hashable] | None = None,
-    *,
-    exclude: Iterable[Hashable] = (),
-) -> pd.DataFrame:
-    """Strip leading/trailing whitespace on object/string columns only."""
-    ...
 
 
 def replace_placeholders_with_na(

@@ -1,11 +1,7 @@
 import numpy as np
 import pandas as pd
 import pytest
-from data_cleaning_agent.cleaners import (
-    drop_columns_by_missing,
-    missing_share,
-    normalize_column_names,
-)
+from data_cleaning_agent import cleaners
 
 
 @pytest.mark.unit
@@ -40,7 +36,7 @@ def test_normalize_column_names(data: dict, expected_columns: list[str]) -> None
     df = pd.DataFrame(data)
     original_id = id(df)
     original_cols = list(df.columns)
-    out = normalize_column_names(df)
+    out = cleaners.normalize_column_names(df)
     assert id(df) == original_id
     assert list(df.columns) == original_cols
     assert list(out.columns) == expected_columns
@@ -101,7 +97,7 @@ def test_missing_share(
     expected: pd.Series,
 ) -> None:
     df = pd.DataFrame(data)
-    result = missing_share(df, cols=cols, treat_blank_as_missing=treat_blank)
+    result = cleaners.missing_share(df, cols=cols, treat_blank_as_missing=treat_blank)
     pd.testing.assert_series_equal(
         result, expected, check_names=True, check_dtype=False
     )
@@ -162,7 +158,7 @@ def test_drop_columns_by_missing(
     expected_columns: list[str],
 ) -> None:
     df = pd.DataFrame(data)
-    out = drop_columns_by_missing(df, threshold, exclude=exclude)
+    out = cleaners.drop_columns_by_missing(df, threshold, exclude=exclude)
     assert list(out.columns) == expected_columns
 
 
@@ -170,6 +166,64 @@ def test_drop_columns_by_missing(
 def test_drop_columns_by_missing_rejects_threshold_out_of_range() -> None:
     df = pd.DataFrame({"x": [1]})
     with pytest.raises(ValueError, match="threshold"):
-        drop_columns_by_missing(df, -0.01)
+        cleaners.drop_columns_by_missing(df, -0.01)
     with pytest.raises(ValueError, match="threshold"):
-        drop_columns_by_missing(df, 1.01)
+        cleaners.drop_columns_by_missing(df, 1.01)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "data,cols,exclude,expected",
+    [
+        pytest.param(
+            {"s": ["  a  ", "b"], "t": ["  Sales  ", "marketing"]},
+            None,
+            (),
+            {"s": ["a", "b"], "t": ["Sales", "marketing"]},
+            id="object_columns_strip_and_preserve_case",
+        ),
+        pytest.param(
+            {"raw": ["  keep  "], "other": [" z "]},
+            None,
+            ("raw",),
+            {"raw": ["  keep  "], "other": ["z"]},
+            id="exclude_column_not_stripped",
+        ),
+        pytest.param(
+            {"a": [" x "], "b": [" y "]},
+            ["a"],
+            (),
+            {"a": ["x"], "b": [" y "]},
+            id="cols_subset_only_strips_listed_string_column",
+        ),
+        pytest.param(
+            {"n": [1, 2], "s": [" a ", " b "]},
+            None,
+            (),
+            {"n": [1, 2], "s": ["a", "b"]},
+            id="numeric_column_unchanged",
+        ),
+        pytest.param(
+            {"s": pd.Series(["  u  "], dtype="string")},
+            None,
+            (),
+            {"s": ["u"]},
+            id="nullable_string_dtype_stripped",
+        ),
+    ],
+)
+def test_strip_strings(
+    data: dict,
+    cols: list[str] | None,
+    exclude: tuple[str, ...],
+    expected: dict,
+) -> None:
+    df = pd.DataFrame(data)
+    out = cleaners.strip_strings(df, cols=cols, exclude=exclude)
+    expected_df = pd.DataFrame(expected)
+    pd.testing.assert_frame_equal(
+        out[sorted(expected_df.columns)],
+        expected_df[sorted(expected_df.columns)],
+        check_dtype=False,
+        check_column_type=False,
+    )
