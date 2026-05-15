@@ -102,8 +102,37 @@ def drop_columns_by_missing(
     *,
     exclude: Iterable[Hashable] = (),
 ) -> pd.DataFrame:
-    """Drop columns whose missing share exceeds ``threshold`` (0–1)."""
-    ...
+    """Drop columns whose missing share is at least ``threshold`` (0–1 inclusive).
+
+    Shares come from :func:`missing_share` (default placeholder and blank
+    semantics). Columns listed in ``exclude`` are never removed. ``exclude``
+    entries that are not column labels on ``df`` are ignored.
+
+    Duplicate column labels on ``df`` are not supported; behavior is undefined.
+
+    Parameters
+    ----------
+    df
+        Input frame (not mutated).
+    threshold
+        Minimum missing share (inclusive) for a column to be dropped.
+    exclude
+        Column names to keep regardless of missing share.
+
+    Raises
+    ------
+    ValueError
+        If ``threshold`` is not in ``[0.0, 1.0]``.
+    """
+    if not 0.0 <= threshold <= 1.0:
+        msg = "threshold must be between 0.0 and 1.0 inclusive"
+        raise ValueError(msg)
+
+    shares = missing_share(df)
+    exclude_set = set(exclude)
+    drop_mask = (shares >= threshold) & ~shares.index.isin(exclude_set)
+    to_drop = shares.loc[drop_mask].index.tolist()
+    return df.drop(columns=to_drop)
 
 
 def strip_strings(

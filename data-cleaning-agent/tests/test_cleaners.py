@@ -1,7 +1,11 @@
 import numpy as np
 import pandas as pd
 import pytest
-from data_cleaning_agent.cleaners import missing_share, normalize_column_names
+from data_cleaning_agent.cleaners import (
+    drop_columns_by_missing,
+    missing_share,
+    normalize_column_names,
+)
 
 
 @pytest.mark.unit
@@ -101,3 +105,71 @@ def test_missing_share(
     pd.testing.assert_series_equal(
         result, expected, check_names=True, check_dtype=False
     )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "data,threshold,exclude,expected_columns",
+    [
+        pytest.param(
+            {"hi": [np.nan, np.nan, np.nan, 1.0], "lo": [1, 2, 3, 4]},
+            0.4,
+            (),
+            ["lo"],
+            id="drops_column_strictly_above_threshold",
+        ),
+        pytest.param(
+            {"x": [1.0, np.nan, 3.0, np.nan], "y": [1, 2, 3, 4]},
+            0.5,
+            (),
+            ["y"],
+            id="drops_column_at_threshold_inclusive",
+        ),
+        pytest.param(
+            {"prot": [np.nan] * 5, "ok": [0, 1, 2, 3, 4]},
+            0.4,
+            ("prot",),
+            ["prot", "ok"],
+            id="exclude_protects_high_missing_column",
+        ),
+        pytest.param(
+            {"prot": [np.nan] * 5, "ok": [0, 1, 2, 3, 4]},
+            0.4,
+            ("prot", "ghost_col"),
+            ["prot", "ok"],
+            id="exclude_unknown_label_ignored_no_keyerror",
+        ),
+        pytest.param(
+            {"lo": [1.0, 2.0, np.nan, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]},
+            0.4,
+            (),
+            ["lo"],
+            id="keeps_column_share_strictly_below_threshold",
+        ),
+        pytest.param(
+            {"a": [1, 2, 3], "b": [4, 5, 6]},
+            0.99,
+            (),
+            ["a", "b"],
+            id="no_op_when_all_shares_below_threshold",
+        ),
+    ],
+)
+def test_drop_columns_by_missing(
+    data: dict,
+    threshold: float,
+    exclude: tuple[str, ...],
+    expected_columns: list[str],
+) -> None:
+    df = pd.DataFrame(data)
+    out = drop_columns_by_missing(df, threshold, exclude=exclude)
+    assert list(out.columns) == expected_columns
+
+
+@pytest.mark.unit
+def test_drop_columns_by_missing_rejects_threshold_out_of_range() -> None:
+    df = pd.DataFrame({"x": [1]})
+    with pytest.raises(ValueError, match="threshold"):
+        drop_columns_by_missing(df, -0.01)
+    with pytest.raises(ValueError, match="threshold"):
+        drop_columns_by_missing(df, 1.01)

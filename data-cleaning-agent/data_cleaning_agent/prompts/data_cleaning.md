@@ -69,18 +69,18 @@ Pipeline (in order):
    fraction of rows where the value is ``pd.NA``/NaN **or** (for object/string
    dtypes) the stripped string is empty **or** equals a common placeholder token
    (treat the same token list as step 5: ``""``, ``"N/A"``, ``"n/a"``, etc.). If
-   missing share **> 0.4**, **drop** that column, EXCEPT columns **explicitly** listed in User
+   missing share **>= 0.4** (at least 0.4), **drop** that column, EXCEPT columns **explicitly** listed in User
    Instructions as protected from drops. The synthetic row id column
    (``__agent_row_id__``) is **never** high-missing in normal operation; do **not**
    add it to step-3 drop-exemption lists (no ``.difference([..., '__agent_row_id__', ...])``).
    Step-3 exemptions are **only** columns User Instructions name; do **not** infer exemptions from
-   column names or from Dataset Summary. Drop whenever missing share **> 0.4** unless User Instructions explicitly name that column as protected.
+   column names or from Dataset Summary. Drop whenever missing share **>= 0.4** unless User Instructions explicitly name that column as protected.
    **Forbidden:** any hard-coded column name used to **skip** the high-missing drop
    unless that **exact** normalized name appears **verbatim** in the **User Instructions**
    text below—including ``.difference([...])``, ``if ... not in [...]``,
    ``col not in ['a', 'b', ...]``, ``set(...).difference(...)``, or similar. Do **not**
    add names you only saw in Dataset Summary or in examples elsewhere in this prompt.
-   When nothing is exempt, drop all columns above the threshold **without** such
+   When nothing is exempt, drop all columns at or above the threshold **without** such
    lists (or include **only** names literally present in User Instructions).
    Dropping here **immediately after step
    2** avoids wasted work and wrong imputation paths on columns that are mostly empty.
@@ -149,7 +149,7 @@ Pipeline (in order):
      synthetic sentinels such as ``"unknown"`` unless User Instructions name that
      exact string for a column.
    - **Never** use synthetic string fills on columns that are mostly missing: drop
-     them in step 3 when missing share **> 0.4**, or leave remaining NaN as-is.
+     them in step 3 when missing share **>= 0.4**, or leave remaining NaN as-is.
    - User Instructions may require a **named** sentinel for a specific column—then
      implement that exact string only.
 9. Drop rows that are entirely NaN: df.dropna(how="all").
