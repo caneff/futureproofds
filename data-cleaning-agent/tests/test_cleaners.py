@@ -227,3 +227,64 @@ def test_strip_strings(
         check_dtype=False,
         check_column_type=False,
     )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "data,cols,placeholders_spec,expected",
+    [
+        pytest.param(
+            {"s": ["  N/A  ", "ok", "  null  "], "n": [1, 2, 3]},
+            None,
+            None,
+            {"s": [np.nan, "ok", np.nan], "n": [1, 2, 3]},
+            id="defaults_strip_and_replace_numeric_unchanged",
+        ),
+        pytest.param(
+            {"s": ["", "   ", "x"]},
+            None,
+            None,
+            {"s": [np.nan, np.nan, "x"]},
+            id="empty_and_whitespace_only_become_na",
+        ),
+        pytest.param(
+            {"a": ["N/A"], "b": ["N/A"]},
+            ["a"],
+            None,
+            {"a": [np.nan], "b": ["N/A"]},
+            id="cols_subset_only_scored_column_replaced",
+        ),
+        pytest.param(
+            {"s": ["  TBD  ", "N/A"]},
+            None,
+            ("TBD",),
+            {"s": [np.nan, "N/A"]},
+            id="custom_placeholder_only",
+        ),
+        pytest.param(
+            {"s": ["N/A"]},
+            None,
+            (),
+            {"s": ["N/A"]},
+            id="empty_placeholder_iterable_no_op",
+        ),
+    ],
+)
+def test_replace_placeholders_with_na(
+    data: dict,
+    cols: list[str] | None,
+    placeholders_spec: tuple[str, ...] | None,
+    expected: dict,
+) -> None:
+    df = pd.DataFrame(data)
+    out = cleaners.replace_placeholders_with_na(
+        df, placeholders=placeholders_spec, cols=cols
+    )
+
+    expected_df = pd.DataFrame(expected)
+    pd.testing.assert_frame_equal(
+        out[sorted(expected_df.columns)],
+        expected_df[sorted(expected_df.columns)],
+        check_dtype=False,
+        check_column_type=False,
+    )

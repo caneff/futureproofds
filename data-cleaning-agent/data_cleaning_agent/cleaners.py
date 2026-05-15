@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Hashable, Iterable, cast
 
+import numpy as np
 import pandas as pd
 
 # Non-empty tokens aligned with ``data_cleaning.md`` step 5; empty-after-strip uses
@@ -23,12 +24,29 @@ _PLACEHOLDER_TOKENS: tuple[str, ...] = (
     "unknown",
 )
 
+# Step 5 in ``data_cleaning.md`` includes empty string; :data:`_PLACEHOLDER_TOKENS` omits it
+# for :func:`missing_share` blank handling via ``treat_blank_as_missing``.
+_DEFAULT_PLACEHOLDER_REPLACE_TOKENS: tuple[str, ...] = ("",) + _PLACEHOLDER_TOKENS
+
 
 def _target_columns(
     df: pd.DataFrame, cols: Iterable[Hashable] | None
 ) -> list[Hashable]:
     """Return column labels to use; when ``cols`` is None, use ``df.columns`` order."""
     return list(df.columns if cols is None else cols)
+
+
+def _string_like_subframe(
+    df: pd.DataFrame, cols: Iterable[Hashable] | None
+) -> pd.DataFrame:
+    """Target-column slice of ``df`` restricted to object / pandas string columns.
+
+    Applies :func:`_target_columns` then ``DataFrame.select_dtypes``. Duplicate
+    column labels on ``df`` are not supported; behavior is undefined. Labels not
+    present in ``df`` follow ``reindex`` semantics for the intermediate slice.
+    """
+    work = df.reindex(columns=_target_columns(df, cols))
+    return work.select_dtypes(include=["object", "string"])
 
 
 def strip_strings(
@@ -63,8 +81,7 @@ def strip_strings(
         A copy of ``df`` with stripped values where applicable.
     """
     out = df.copy()
-    work = df.reindex(columns=_target_columns(df, cols))
-    str_work = work.select_dtypes(include=["object", "string"])
+    str_work = _string_like_subframe(df, cols)
     if str_work.shape[1] == 0:
         return out
     stripped = cast(
@@ -110,8 +127,8 @@ def missing_share(
     prompt (for example ``N/A``, ``null``, or ``-``) also count. When
     ``treat_blank_as_missing`` is true, a stripped empty string (including
     whitespace-only cells) counts as missing. Stripped values for those checks
-    come from :func:`strip_strings` with ``exclude=()`` (same step-4 strip as the
-    public helper; builds a full copy of ``df``).
+    use the same step-4 semantics as :func:`strip_strings` (via
+    ``strip_strings`` on the string-like subframe from :func:`_string_like_subframe`).
 
     Duplicate column labels on ``df`` are not supported; behavior is undefined.
 
@@ -137,10 +154,8 @@ def missing_share(
         return pd.Series({c: float("nan") for c in target_cols}, dtype="float64")
 
     mask = work.isna()
-    str_only_raw = work.reindex(columns=work.columns).select_dtypes(
-        include=["object", "string"],
-    )
-    str_only = strip_strings(str_only_raw, cols=cols, exclude=())
+    str_only_raw = _string_like_subframe(df, cols)
+    str_only = strip_strings(str_only_raw)
 
     if str_only.shape[1] > 0:
         str_bad = str_only.isin(_PLACEHOLDER_TOKENS) | (
@@ -195,8 +210,55 @@ def replace_placeholders_with_na(
     placeholders: Iterable[str] | None = None,
     cols: Iterable[Hashable] | None = None,
 ) -> pd.DataFrame:
-    """Replace common placeholder strings with NaN in object/string columns."""
-    ...
+    """Replace placeholder strings with NaN in object/string columns.
+
+    Matches cleaning prompt step 5: only ``object`` / pandas string dtypes in the
+    column slice are considered. Each cell is compared to the placeholder set
+    **after** applying :func:`strip_strings` to the string-like subframe (same
+    step-4 behavior as elsewhere in this module). Cells whose stripped value is in
+    the set become ``numpy.nan``; other cells are left unchanged (including
+    original whitespace on non-matching cells). When ``placeholders`` is ``None``,
+    uses the default list from the prompt (including empty string after strip).
+
+    Duplicate column labels on ``df`` are not supported; behavior is undefined.
+    Column labels in ``cols`` that are missing from ``df`` follow ``reindex``
+    semantics for the string-like slice.
+
+    Parameters
+    ----------
+    df
+        Input frame (not mutated).
+    placeholders
+        Tokens to treat as missing (compared after ``.strip()`` on each token).
+        ``None`` uses :data:`_DEFAULT_PLACEHOLDER_REPLACE_TOKENS`. An empty
+        iterable performs no replacements.
+    cols
+        Columns to scan; default is all columns in ``df`` order. Only
+        string-like columns in this slice are updated.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A copy of ``df`` with placeholder cells set to NaN where applicable.
+    """
+    out = df.copy()
+    str_work = _string_like_subframe(df, cols)
+    if str_work.shape[1] == 0:
+        return out
+
+    stripped = strip_strings(str_work)
+    if placeholders is None:
+        tokens = _DEFAULT_PLACEHOLDER_REPLACE_TOKENS
+    else:
+        tokens = tuple(p.strip() for p in placeholders)
+    if not tokens:
+        return out
+
+    for col in stripped.columns:
+        matches = stripped[col].isin(tokens)
+        if bool(matches.any()):
+            out.loc[matches, col] = np.nan
+    return out
 
 
 def coerce_datetime_columns(
