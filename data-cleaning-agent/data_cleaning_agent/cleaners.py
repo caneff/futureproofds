@@ -1,4 +1,9 @@
-"""Reusable pandas cleaning helpers for LLM-generated code."""
+"""Reusable pandas cleaning helpers for LLM-generated code.
+
+Unless a function says otherwise, ``df`` is not mutated: helpers return a new
+frame or series. Duplicate column labels on ``df`` are not supported; behavior
+is undefined.
+"""
 
 from __future__ import annotations
 
@@ -8,9 +13,9 @@ from typing import Hashable, Iterable, cast
 import numpy as np
 import pandas as pd
 
-# Non-empty tokens aligned with ``data_cleaning.md`` step 5; empty-after-strip uses
-# ``treat_blank_as_missing`` instead of a literal ``""`` token here. Tuple form so
-# ``DataFrame.isin`` type checkers accept the collection.
+# Non-empty placeholder tokens for missing detection (compared after strip).
+# Literal ``""`` is omitted here; blanks are handled via ``treat_blank_as_missing``
+# in :func:`missing_share`. Tuple form so ``DataFrame.isin`` type checkers accept it.
 _PLACEHOLDER_TOKENS: tuple[str, ...] = (
     "N/A",
     "n/a",
@@ -24,14 +29,14 @@ _PLACEHOLDER_TOKENS: tuple[str, ...] = (
     "unknown",
 )
 
-# Step 5 in ``data_cleaning.md`` includes empty string; :data:`_PLACEHOLDER_TOKENS` omits it
-# for :func:`missing_share` blank handling via ``treat_blank_as_missing``.
+# Prepends ``""`` to :data:`_PLACEHOLDER_TOKENS` so stripped-empty cells count as
+# missing in :func:`missing_share` when ``treat_blank_as_missing`` is true.
 _DEFAULT_PLACEHOLDER_REPLACE_TOKENS: tuple[str, ...] = ("",) + _PLACEHOLDER_TOKENS
 
-# Step 6 in ``data_cleaning.md``: strip currency/percent/thousands markers before ``to_numeric``.
+# Strip ``$``, comma, and ``%`` from string columns before ``pd.to_numeric``.
 _NUMERIC_CURRENCY_STRIP_PATTERN = r"[$,%]"
 
-# Casefolded tokens mapped to True / False (aligned with step 6 and boolean detection elsewhere).
+# Casefolded string tokens mapped to True / False for boolean-like coercion.
 _TRUE_BOOL_TOKENS: frozenset[str] = frozenset({"yes", "true", "t", "y", "1"})
 _FALSE_BOOL_TOKENS: frozenset[str] = frozenset({"no", "false", "f", "n", "0"})
 
@@ -46,11 +51,9 @@ def _target_columns(
 def _string_like_subframe(
     df: pd.DataFrame, cols: Iterable[Hashable] | None
 ) -> pd.DataFrame:
-    """Target-column slice of ``df`` restricted to object / pandas string columns.
+    """Object / string columns from the target slice (``_target_columns`` + ``select_dtypes``).
 
-    Applies :func:`_target_columns` then ``DataFrame.select_dtypes``. Duplicate
-    column labels on ``df`` are not supported; behavior is undefined. Labels not
-    present in ``df`` follow ``reindex`` semantics for the intermediate slice.
+    Labels missing from ``df`` follow ``reindex`` semantics for the slice.
     """
     work = df.reindex(columns=_target_columns(df, cols))
     return work.select_dtypes(include=["object", "string"])
@@ -62,30 +65,25 @@ def strip_strings(
     *,
     exclude: Iterable[Hashable] = (),
 ) -> pd.DataFrame:
-    """Strip leading/trailing whitespace on object/string columns only.
+    """Strip leading/trailing whitespace on object and pandas string columns.
 
-    Matches cleaning prompt step 4: only ``object`` / pandas string dtypes are
-    updated with ``.str.strip()``; casing is unchanged. Columns in ``exclude``
-    are not modified. ``exclude`` entries that are not column labels are
-    ignored.
-
-    Duplicate column labels on ``df`` are not supported; behavior is undefined.
+    Only string-like dtypes get ``.str.strip()``; casing unchanged. ``cols``
+    limits the scan (``None`` = all columns). Names in ``exclude`` are skipped;
+    unknown ``exclude`` labels are ignored.
 
     Parameters
     ----------
     df
-        Input frame (not mutated).
+        Frame to copy and update.
     cols
-        Columns to consider for stripping; default is all columns. Columns
-        outside this list are unchanged. Non-string-like dtypes in the slice
-        are skipped.
+        Columns to scan, or ``None`` for all.
     exclude
-        Column names to leave unchanged (even if string-like and in ``cols``).
+        Column names never stripped.
 
     Returns
     -------
     pandas.DataFrame
-        A copy of ``df`` with stripped values where applicable.
+        Copy with stripped cells where applicable.
     """
     out = df.copy()
     str_work = _string_like_subframe(df, cols)
@@ -113,11 +111,7 @@ def _normalize_single_column_name(name: Hashable) -> str:
 
 
 def normalize_column_names(df: pd.DataFrame) -> pd.DataFrame:
-    """Lowercase, strip, and replace runs of non-word characters with a single underscore.
-
-    Word characters are those matched by ``\\w`` in Unicode mode (:mod:`re`);
-    adjacent underscores are collapsed.
-    """
+    """Strip and lowercase column names; map non-word runs to a single underscore (Unicode ``\\w``)."""
     return df.copy().rename(columns=_normalize_single_column_name, copy=False)
 
 
@@ -129,31 +123,24 @@ def missing_share(
 ) -> pd.Series:
     """Per-column missing fraction in ``[0, 1]``.
 
-    A value counts as missing when it is null (``pd.isna``). For object / pandas
-    string columns, values equal to stripped placeholders from the cleaning
-    prompt (for example ``N/A``, ``null``, or ``-``) also count. When
-    ``treat_blank_as_missing`` is true, a stripped empty string (including
-    whitespace-only cells) counts as missing. Stripped values for those checks
-    use the same step-4 semantics as :func:`strip_strings` (via
-    ``strip_strings`` on the string-like subframe from :func:`_string_like_subframe`).
-
-    Duplicate column labels on ``df`` are not supported; behavior is undefined.
+    Uses ``pd.isna`` on all dtypes; on string-like columns also counts stripped
+    :data:`_PLACEHOLDER_TOKENS` and, if ``treat_blank_as_missing``, stripped empty
+    strings (via :func:`strip_strings` on the string slice). **Zero-row** frames
+    yield all-NaN shares.
 
     Parameters
     ----------
     df
-        Input frame (read-only; not mutated).
+        Frame to score.
     cols
-        Columns to score; default is all columns in order.
+        Columns to score, or ``None`` for all in order.
     treat_blank_as_missing
-        If true, treat stripped-empty string cells as missing on string-like
-        columns.
+        Treat stripped-empty strings as missing on string-like columns.
 
     Returns
     -------
     pandas.Series
-        Float shares indexed like ``cols`` (or ``df.columns`` when ``cols`` is
-        None). If ``df`` has zero rows, every value is NaN.
+        Float shares indexed like the scored columns.
     """
     target_cols = _target_columns(df, cols)
     work = df.reindex(columns=target_cols)
@@ -179,27 +166,28 @@ def drop_columns_by_missing(
     *,
     exclude: Iterable[Hashable] = (),
 ) -> pd.DataFrame:
-    """Drop columns whose missing share is at least ``threshold`` (0–1 inclusive).
+    """Drop columns whose :func:`missing_share` is at least ``threshold`` (0–1 inclusive).
 
-    Shares come from :func:`missing_share` (default placeholder and blank
-    semantics). Columns listed in ``exclude`` are never removed. ``exclude``
-    entries that are not column labels on ``df`` are ignored.
-
-    Duplicate column labels on ``df`` are not supported; behavior is undefined.
+    Names in ``exclude`` are kept; unknown ``exclude`` labels are ignored.
 
     Parameters
     ----------
     df
-        Input frame (not mutated).
+        Frame to drop columns from.
     threshold
-        Minimum missing share (inclusive) for a column to be dropped.
+        Inclusive minimum missing share for a column to be dropped.
     exclude
-        Column names to keep regardless of missing share.
+        Column names never dropped.
 
     Raises
     ------
     ValueError
         If ``threshold`` is not in ``[0.0, 1.0]``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        New frame without dropped columns.
     """
     if not 0.0 <= threshold <= 1.0:
         msg = "threshold must be between 0.0 and 1.0 inclusive"
@@ -217,36 +205,26 @@ def replace_placeholders_with_na(
     placeholders: Iterable[str] | None = None,
     cols: Iterable[Hashable] | None = None,
 ) -> pd.DataFrame:
-    """Replace placeholder strings with NaN in object/string columns.
+    """Replace placeholder tokens with NaN on object/string columns.
 
-    Matches cleaning prompt step 5: only ``object`` / pandas string dtypes in the
-    column slice are considered. Each cell is compared to the placeholder set
-    **after** applying :func:`strip_strings` to the string-like subframe (same
-    step-4 behavior as elsewhere in this module). Cells whose stripped value is in
-    the set become ``numpy.nan``; other cells are left unchanged (including
-    original whitespace on non-matching cells). When ``placeholders`` is ``None``,
-    uses the default list from the prompt (including empty string after strip).
-
-    Duplicate column labels on ``df`` are not supported; behavior is undefined.
-    Column labels in ``cols`` that are missing from ``df`` follow ``reindex``
-    semantics for the string-like slice.
+    The string slice is :func:`strip_strings` first; cells whose stripped value is
+    in ``placeholders`` become ``numpy.nan`` (``None`` →
+    :data:`_DEFAULT_PLACEHOLDER_REPLACE_TOKENS`). Empty ``placeholders`` is a no-op.
+    ``cols`` limits the scan; missing labels use ``reindex`` semantics.
 
     Parameters
     ----------
     df
-        Input frame (not mutated).
+        Frame to copy and update.
     placeholders
-        Tokens to treat as missing (compared after ``.strip()`` on each token).
-        ``None`` uses :data:`_DEFAULT_PLACEHOLDER_REPLACE_TOKENS`. An empty
-        iterable performs no replacements.
+        Tokens after strip, or ``None`` for the default set.
     cols
-        Columns to scan; default is all columns in ``df`` order. Only
-        string-like columns in this slice are updated.
+        Columns to scan, or ``None`` for all.
 
     Returns
     -------
     pandas.DataFrame
-        A copy of ``df`` with placeholder cells set to NaN where applicable.
+        Copy with matching cells set to NaN.
     """
     out = df.copy()
     str_work = _string_like_subframe(df, cols)
@@ -310,27 +288,21 @@ def coerce_datetime_columns(
     df: pd.DataFrame,
     columns: Iterable[Hashable],
 ) -> pd.DataFrame:
-    """Parse named columns to datetimes (step 6 ``date_like`` path).
+    """Parse named columns with ``pd.to_datetime(..., errors='coerce', format='mixed')``.
 
-    Each listed column is passed through ``pd.to_datetime(..., errors="coerce",
-    format="mixed")`` so heterogeneous date strings parse without noisy format
-    warnings on pandas 2.x. Values that cannot parse become ``NaT``.
-
-    Labels in ``columns`` that are not on ``df`` are ignored. Duplicate column
-    labels on ``df`` are not supported; behavior is undefined.
+    Unparseable values become ``NaT``. Unknown ``columns`` names are ignored.
 
     Parameters
     ----------
     df
-        Input frame (not mutated).
+        Frame to copy and update.
     columns
-        Names to coerce that exist on ``df``; others are ignored.
+        Names to coerce if present on ``df``.
 
     Returns
     -------
     pandas.DataFrame
-        A copy of ``df`` with the listed columns coerced to datetime64 where
-        possible.
+        Copy with coerced datetime columns where applicable.
     """
     out = df.copy()
     present = out.columns.intersection(columns)
@@ -344,28 +316,23 @@ def coerce_numeric_columns(
     df: pd.DataFrame,
     columns: Iterable[Hashable],
 ) -> pd.DataFrame:
-    """Coerce named columns to numeric after optional currency/percent stripping.
+    """Coerce named columns to numeric.
 
-    Matches cleaning prompt step 6 for ``numeric_string_like`` columns: for
-    ``object`` / pandas ``string`` dtypes, strip dollar sign, comma, and percent
-    using the raw-string regex :data:`_NUMERIC_CURRENCY_STRIP_PATTERN`, then
-    ``pd.to_numeric(..., errors="coerce")``. Columns that are already numeric
-    receive ``to_numeric`` only (no ``.str`` accessor). Other dtypes are left
-    unchanged. Unknown column labels are ignored.
-
-    Duplicate column labels on ``df`` are not supported; behavior is undefined.
+    Object/string columns: strip :data:`_NUMERIC_CURRENCY_STRIP_PATTERN` then
+    ``pd.to_numeric(..., errors='coerce')``. Already-numeric columns get
+    ``to_numeric`` only. Other dtypes unchanged. Unknown ``columns`` names ignored.
 
     Parameters
     ----------
     df
-        Input frame (not mutated).
+        Frame to copy and update.
     columns
-        Names to coerce that exist on ``df``; others are ignored.
+        Names to coerce if present on ``df``.
 
     Returns
     -------
     pandas.DataFrame
-        A copy of ``df`` with applicable columns coerced to numeric dtypes.
+        Copy with coerced numeric columns where applicable.
     """
     out = df.copy()
     present = out.columns.intersection(columns)
@@ -379,28 +346,23 @@ def coerce_bool_columns(
     df: pd.DataFrame,
     columns: Iterable[Hashable],
 ) -> pd.DataFrame:
-    """Map boolean-like tokens in named columns to nullable boolean dtype.
+    """Map stripped, casefolded tokens to nullable ``boolean``.
 
-    After strip and casefold, tokens in :data:`_TRUE_BOOL_TOKENS` become ``True``
-    and tokens in :data:`_FALSE_BOOL_TOKENS` become ``False`` (aligned with step
-    6 and boolean-like detection elsewhere). Other non-null strings become
-    ``pd.NA``. Null inputs remain null. Columns already boolean are cast to
-    nullable ``boolean``. Non string-like, non-bool dtypes are unchanged.
-    Unknown column labels are ignored.
-
-    Duplicate column labels on ``df`` are not supported; behavior is undefined.
+    :data:`_TRUE_BOOL_TOKENS` / :data:`_FALSE_BOOL_TOKENS` → True/False; other
+    non-null strings → ``pd.NA``. Existing bool columns become nullable boolean;
+    non-string, non-bool dtypes unchanged. Unknown ``columns`` names ignored.
 
     Parameters
     ----------
     df
-        Input frame (not mutated).
+        Frame to copy and update.
     columns
-        Names to coerce that exist on ``df``; others are ignored.
+        Names to coerce if present on ``df``.
 
     Returns
     -------
     pandas.DataFrame
-        A copy of ``df`` with applicable columns as nullable booleans.
+        Copy with coerced boolean columns where applicable.
     """
     out = df.copy()
     present = out.columns.intersection(columns)
@@ -415,30 +377,24 @@ def drop_constant_columns(
     *,
     exclude: Iterable[Hashable] = (),
 ) -> pd.DataFrame:
-    """Drop columns with exactly one distinct non-null value.
+    """Drop columns with exactly one distinct non-null value (``nunique(dropna=True) == 1``).
 
-    Matches cleaning prompt step 7 for **constant** columns: ``nunique(dropna=True)
-    == 1``. Columns that are entirely NA (``nunique == 0``) are not removed here;
-    use :func:`drop_all_null_columns` instead.
-
-    Columns listed in ``exclude`` are never dropped. ``exclude`` entries that are
-    not column labels on ``df`` are ignored.
-
-    Duplicate column labels on ``df`` are not supported; behavior is undefined.
+    All-NA columns (``nunique == 0``) are left unchanged; use :func:`drop_all_null_columns`.
+    Names in ``exclude`` are kept; unknown ``exclude`` labels ignored.
 
     Parameters
     ----------
     df
-        Input frame (not mutated).
+        Frame to drop columns from.
     exclude
-        Column names to keep even when constant.
+        Column names never dropped.
 
     Returns
     -------
     pandas.DataFrame
-        A new frame with constant columns removed.
+        New frame without dropped columns.
     """
-    nu = cast(pd.Series, df.nunique(dropna=True))
+    nu = df.nunique(dropna=True)
     is_constant = nu.eq(1)
     drop_mask = is_constant & ~is_constant.index.isin(exclude)
     to_drop = drop_mask[drop_mask].index.tolist()
@@ -450,28 +406,22 @@ def drop_all_null_columns(
     *,
     exclude: Iterable[Hashable] = (),
 ) -> pd.DataFrame:
-    """Drop columns where every row is NA.
+    """Drop columns that are NA in every row.
 
-    Matches cleaning prompt step 7 for **100% missing** columns. When ``df`` has
-    zero rows, returns a copy with no columns removed (``isna().all`` would
-    otherwise be vacuously true for every column).
-
-    Columns listed in ``exclude`` are never dropped. ``exclude`` entries that are
-    not column labels on ``df`` are ignored.
-
-    Duplicate column labels on ``df`` are not supported; behavior is undefined.
+    **Zero rows:** returns a copy with no columns dropped (avoids vacuous ``all``).
+    Names in ``exclude`` are kept; unknown ``exclude`` labels ignored.
 
     Parameters
     ----------
     df
-        Input frame (not mutated).
+        Frame to drop columns from.
     exclude
-        Column names to keep even when all-null.
+        Column names never dropped.
 
     Returns
     -------
     pandas.DataFrame
-        A new frame with all-null columns removed.
+        New frame without dropped columns.
     """
     if len(df) == 0:
         return df.copy()
