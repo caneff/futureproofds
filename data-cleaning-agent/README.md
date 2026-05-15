@@ -1,7 +1,5 @@
 # Data Cleaning Agent
 
-> **Monorepo note:** This directory is **historical** in this repository. For active work and discussion, use **[`data-cleaning-agent-new/`](../data-cleaning-agent-new/)** at the repo root.
-
 An AI-powered data cleaning agent that automatically cleans messy datasets using LangChain and LangGraph. The agent uses an LLM to generate and execute Python code for common data cleaning tasks like handling missing values, removing duplicates, and dropping low-quality columns.
 
 ## How It Works
