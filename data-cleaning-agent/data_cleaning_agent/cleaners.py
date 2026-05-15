@@ -79,7 +79,7 @@ def missing_share(
     if n == 0:
         return pd.Series({c: float("nan") for c in target_cols}, dtype="float64")
 
-    mask = work.isna().copy()
+    mask = work.isna()
     str_work = work.select_dtypes(include=["object", "string"])
     if str_work.shape[1] > 0:
         stripped = str_work.astype("string").apply(
