@@ -44,6 +44,11 @@ def test_normalize_column_names(data: dict, expected_columns: list[str]) -> None
 
 
 @pytest.mark.unit
+def test_normalize_column_label() -> None:
+    assert cleaners.normalize_column_label("Customer Name") == "customer_name"
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "data,cols,treat_blank,expected",
     [

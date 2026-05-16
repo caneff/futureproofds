@@ -107,6 +107,11 @@ def _normalize_single_column_name(name: Hashable) -> str:
     return merged.strip("_")
 
 
+def normalize_column_label(name: Hashable) -> str:
+    """Normalize a single column label (same rules as ``normalize_column_names``)."""
+    return _normalize_single_column_name(name)
+
+
 def normalize_column_names(df: pd.DataFrame) -> pd.DataFrame:
     """Strip and lowercase column names; map non-word runs to a single underscore (Unicode ``\\w``)."""
     return df.copy().rename(columns=_normalize_single_column_name, copy=False)
