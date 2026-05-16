@@ -90,11 +90,13 @@ def build_cleaning_outcome_facts(
             continue
         if _series_equal_ignoring_dtype(b_ser, a_ser):
             continue
-        dtype_changed.append({
-            "name": name,
-            "before_dtype": str(b_ser.dtype),
-            "after_dtype": str(a_ser.dtype),
-        })
+        dtype_changed.append(
+            {
+                "name": name,
+                "before_dtype": str(b_ser.dtype),
+                "after_dtype": str(a_ser.dtype),
+            }
+        )
 
     null_deltas: list[dict[str, Any]] = []
     for name in shared:
@@ -104,12 +106,14 @@ def build_cleaning_outcome_facts(
         amiss = int(first_column_as_series(df_after, name).isna().sum())
         delta = amiss - bmiss
         if delta != 0:
-            null_deltas.append({
-                "column": name,
-                "missing_before": bmiss,
-                "missing_after": amiss,
-                "delta": delta,
-            })
+            null_deltas.append(
+                {
+                    "column": name,
+                    "missing_before": bmiss,
+                    "missing_after": amiss,
+                    "delta": delta,
+                }
+            )
     null_deltas.sort(key=lambda r: abs(r["delta"]), reverse=True)
     null_deltas = null_deltas[:null_top_k]
 

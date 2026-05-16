@@ -51,10 +51,7 @@ def _target_columns(
 def _string_like_subframe(
     df: pd.DataFrame, cols: Iterable[Hashable] | None
 ) -> pd.DataFrame:
-    """Object / string columns from the target slice (``_target_columns`` + ``select_dtypes``).
-
-    Labels missing from ``df`` follow ``reindex`` semantics for the slice.
-    """
+    """Object / string columns from the target slice."""
     work = df.reindex(columns=_target_columns(df, cols))
     return work.select_dtypes(include=["object", "string"])
 
@@ -207,10 +204,9 @@ def replace_placeholders_with_na(
 ) -> pd.DataFrame:
     """Replace placeholder tokens with NaN on object/string columns.
 
-    The string slice is :func:`strip_strings` first; cells whose stripped value is
+    String columns are first stripped then cells whose stripped value is
     in ``placeholders`` become ``numpy.nan`` (``None`` →
     :data:`_DEFAULT_PLACEHOLDER_REPLACE_TOKENS`). Empty ``placeholders`` is a no-op.
-    ``cols`` limits the scan; missing labels use ``reindex`` semantics.
 
     Parameters
     ----------
@@ -437,25 +433,40 @@ def impute_numeric_median_or_mean(
     skew_threshold: float = 1.0,
 ) -> pd.Series:
     """Fill numeric NA using median if |skew| > threshold, else mean."""
-    ...
+    if not pd.api.types.is_numeric_dtype(s):
+        return s.copy()
+    out = s.copy()
+    if len(out) == 0 or not out.notna().any():
+        return out
+    skew = float(out.skew(skipna=True, numeric_only=True))
+
+    use_median = np.isfinite(skew) and abs(skew) > skew_threshold
+    stat = (
+        out.median(skipna=True, numeric_only=True)
+        if use_median
+        else out.mean(skipna=True, numeric_only=True)
+    )
+    stat_f = float(stat)
+
+    if not np.isfinite(stat_f):
+        return out
+    return out.fillna(stat)
 
 
-def impute_categorical_mode(
-    s: pd.Series,
-    *,
-    dropna_before_mode: bool = True,
-) -> pd.Series:
+def impute_categorical_mode(s: pd.Series) -> pd.Series:
     """Fill NA in string/categorical-like series using the mode when sensible."""
-    ...
-
-
-def safe_assign_series(
-    df: pd.DataFrame,
-    col: Hashable,
-    values: pd.Series,
-) -> pd.DataFrame:
-    """Assign a like-indexed series to ``df[col]`` without mutating the caller."""
-    ...
+    if not (
+        pd.api.types.is_object_dtype(s)
+        or pd.api.types.is_string_dtype(s)
+        or isinstance(s.dtype, pd.CategoricalDtype)
+    ):
+        return s.copy()
+    out = s.copy()
+    modes = out.mode(dropna=True)
+    if modes.empty:
+        return out
+    fill_value = modes.iloc[0]
+    return out.fillna(fill_value)
 
 
 def drop_all_null_rows(df: pd.DataFrame) -> pd.DataFrame:

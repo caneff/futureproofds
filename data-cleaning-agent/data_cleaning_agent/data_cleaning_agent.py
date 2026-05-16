@@ -95,11 +95,13 @@ def _run_data_cleaning_generation(
             "function_name",
         ],
     )
-    msg_code = (code_prompt | model).invoke({
-        "user_instructions": ui,
-        "all_datasets_summary": dataset_summary,
-        "function_name": function_name,
-    })
+    msg_code = (code_prompt | model).invoke(
+        {
+            "user_instructions": ui,
+            "all_datasets_summary": dataset_summary,
+            "function_name": function_name,
+        }
+    )
     parser = PythonOutputParser()
     code = parser.parse(_llm_content_str(msg_code))
 

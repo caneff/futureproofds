@@ -29,6 +29,10 @@ markers = [
     "unit: fast in-process tests with no external services",
 ]
 
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
 [tool.uv]
 package = false
 

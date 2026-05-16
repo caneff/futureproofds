@@ -412,3 +412,54 @@ def test_drop_all_null_columns(
     assert list(out.columns) == expected_columns
     if expect_copy_not_identity:
         assert out is not df
+
+
+@pytest.mark.unit
+def test_impute_numeric_median_or_mean_skewed_uses_median() -> None:
+    s = pd.Series([1.0, 2.0, 3.0, 4.0, 100.0, np.nan])
+    out = cleaners.impute_numeric_median_or_mean(s)
+    assert out.isna().sum() == 0
+    assert out.iloc[-1] == pytest.approx(3.0)
+
+
+@pytest.mark.unit
+def test_impute_numeric_median_or_mean_symmetric_uses_mean() -> None:
+    s = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0, np.nan])
+    out = cleaners.impute_numeric_median_or_mean(s)
+    assert out.iloc[-1] == pytest.approx(3.0)
+
+
+@pytest.mark.unit
+def test_impute_numeric_median_or_mean_non_numeric_unchanged() -> None:
+    s = pd.Series(["a", np.nan, "b"])
+    out = cleaners.impute_numeric_median_or_mean(s)
+    pd.testing.assert_series_equal(out, s, check_dtype=True)
+
+
+@pytest.mark.unit
+def test_impute_categorical_mode_fills_with_first_mode() -> None:
+    s = pd.Series(["a", "b", "a", np.nan], dtype=object)
+    out = cleaners.impute_categorical_mode(s)
+    assert out.tolist() == ["a", "b", "a", "a"]
+
+
+@pytest.mark.unit
+def test_impute_categorical_mode_tie_breaks_sorted_first() -> None:
+    s = pd.Series(["x", "x", "y", "y", np.nan], dtype=object)
+    out = cleaners.impute_categorical_mode(s)
+    assert out.iloc[-1] == "x"
+
+
+@pytest.mark.unit
+def test_impute_categorical_mode_all_na_returns_copy() -> None:
+    s = pd.Series([np.nan, np.nan, np.nan], dtype=object)
+    out = cleaners.impute_categorical_mode(s)
+    assert out.isna().all()
+    assert out is not s
+
+
+@pytest.mark.unit
+def test_impute_categorical_mode_non_string_like_unchanged() -> None:
+    s = pd.Series([1.0, np.nan, 3.0])
+    out = cleaners.impute_categorical_mode(s)
+    pd.testing.assert_series_equal(out, s, check_dtype=True)

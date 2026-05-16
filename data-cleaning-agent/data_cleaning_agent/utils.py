@@ -22,18 +22,20 @@ _EXC_ROW_ID_SET_COERCION = (TypeError, ValueError)
 
 # Casefolded tokens that boolean-like detection accepts as members of a binary
 # categorical (e.g. "Yes"/"No", "true"/"false", "T"/"F", "0"/"1").
-_BOOL_LIKE_TOKENS = frozenset({
-    "yes",
-    "no",
-    "true",
-    "false",
-    "t",
-    "f",
-    "y",
-    "n",
-    "0",
-    "1",
-})
+_BOOL_LIKE_TOKENS = frozenset(
+    {
+        "yes",
+        "no",
+        "true",
+        "false",
+        "t",
+        "f",
+        "y",
+        "n",
+        "0",
+        "1",
+    }
+)
 
 
 def run_cleaner_code_on_dataframe(
