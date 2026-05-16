@@ -470,13 +470,38 @@ def impute_categorical_mode(s: pd.Series) -> pd.Series:
 
 
 def drop_all_null_rows(df: pd.DataFrame) -> pd.DataFrame:
-    """Drop rows that are entirely NA across columns."""
-    ...
+    """Drop rows that are entirely NA across columns.
+
+    Returns
+    -------
+    pandas.DataFrame
+        New frame without all-null rows.
+    """
+    return df.dropna(how="all")
 
 
 def drop_duplicate_rows(
     df: pd.DataFrame,
     subset: Iterable[Hashable] | None = None,
 ) -> pd.DataFrame:
-    """Drop exact duplicate rows (optionally on a subset of columns)."""
-    ...
+    """Drop exact duplicate rows, keeping the first occurrence.
+
+    Parameters
+    ----------
+    df
+        Frame to deduplicate.
+    subset
+        Columns to compare, or ``None`` for all columns. Unknown labels are
+        ignored; if none match, returns a copy unchanged.
+
+    Returns
+    -------
+    pandas.DataFrame
+        New frame with duplicate rows removed.
+    """
+    if subset is None:
+        return df.drop_duplicates()
+    present = df.columns.intersection(subset)
+    if present.empty:
+        return df.copy()
+    return df.drop_duplicates(subset=list(present))

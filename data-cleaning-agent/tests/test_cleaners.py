@@ -464,3 +464,71 @@ def test_impute_categorical_mode_non_string_like_unchanged() -> None:
     s = pd.Series([1.0, np.nan, 3.0])
     out = cleaners.impute_categorical_mode(s)
     pd.testing.assert_series_equal(out, s, check_dtype=True)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "df,expected_len,expect_copy_not_identity",
+    [
+        pytest.param(
+            pd.DataFrame({"a": [1.0, np.nan], "b": [2.0, np.nan]}),
+            1,
+            False,
+            id="drops_all_null_row",
+        ),
+        pytest.param(
+            pd.DataFrame({"x": pd.Series([], dtype=float)}),
+            0,
+            True,
+            id="empty_frame_returns_copy",
+        ),
+    ],
+)
+def test_drop_all_null_rows(
+    df: pd.DataFrame,
+    expected_len: int,
+    expect_copy_not_identity: bool,
+) -> None:
+    out = cleaners.drop_all_null_rows(df)
+    assert len(out) == expected_len
+    if expect_copy_not_identity:
+        assert out is not df
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "df,subset,expected_len",
+    [
+        pytest.param(
+            pd.DataFrame({"a": [1, 1], "b": [2, 2]}),
+            None,
+            1,
+            id="dedupe_all_columns",
+        ),
+        pytest.param(
+            pd.DataFrame({"id": [1, 1], "value": [10, 20]}),
+            ("id",),
+            1,
+            id="subset_id_dedupes_same_id",
+        ),
+        pytest.param(
+            pd.DataFrame({"id": [1, 1], "value": [10, 20]}),
+            None,
+            2,
+            id="all_columns_keeps_rows_with_different_values",
+        ),
+        pytest.param(
+            pd.DataFrame({"a": [1, 2]}),
+            ("ghost",),
+            2,
+            id="unknown_subset_unchanged",
+        ),
+    ],
+)
+def test_drop_duplicate_rows(
+    df: pd.DataFrame,
+    subset: tuple[str, ...] | None,
+    expected_len: int,
+) -> None:
+    out = cleaners.drop_duplicate_rows(df, subset=subset)
+    assert len(out) == expected_len
