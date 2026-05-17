@@ -22,20 +22,18 @@ _EXC_ROW_ID_SET_COERCION = (TypeError, ValueError)
 
 # Casefolded tokens that boolean-like detection accepts as members of a binary
 # categorical (e.g. "Yes"/"No", "true"/"false", "T"/"F", "0"/"1").
-_BOOL_LIKE_TOKENS = frozenset(
-    {
-        "yes",
-        "no",
-        "true",
-        "false",
-        "t",
-        "f",
-        "y",
-        "n",
-        "0",
-        "1",
-    }
-)
+_BOOL_LIKE_TOKENS = frozenset({
+    "yes",
+    "no",
+    "true",
+    "false",
+    "t",
+    "f",
+    "y",
+    "n",
+    "0",
+    "1",
+})
 
 
 def run_cleaner_code_on_dataframe(
@@ -206,43 +204,43 @@ class DataFrameSummary:
     columns: dict[str, ColumnSummary]
 
 
-def _extract_python_fenced_block(text: str) -> str | None:
-    """Return the body of the first `` ```python `` … `` ``` `` region, or ``None``.
+_CLOSING_FENCE_LINE = re.compile(r"\s*```\s*")
 
-    The closing fence must be on its own line (optional surrounding whitespace only).
-    This avoids truncating on `` ``` `` that appear inside a line—e.g.
-    ``example = "```"``—which breaks naive non-greedy ``(.*?)``` `` matching and
-    yields invalid Python (often ``SyntaxError: unmatched ')'`` at a later line).
-    """
-    start_m = re.search(r"```\s*python\s*", text, flags=re.IGNORECASE)
-    if not start_m:
-        return None
-    pos = start_m.end()
-    while pos < len(text) and text[pos] in "\r\n":
-        pos += 1
-    rest = text[pos:]
-    lines = rest.splitlines(keepends=True)
-    body_parts: list[str] = []
-    for line in lines:
-        if re.fullmatch(r"\s*```\s*", line.rstrip("\r\n")):
-            return "".join(body_parts).rstrip("\r\n")
-        body_parts.append(line)
-    # No line-final closing fence (legacy / malformed): fall back to first ``` anywhere.
+
+def _body_until_closing_fence(rest: str) -> str:
+    """Collect lines until a line that is only a closing fence."""
+    body_lines: list[str] = []
+    for line in rest.splitlines(keepends=True):
+        if _CLOSING_FENCE_LINE.fullmatch(line.rstrip("\r\n")):
+            return "".join(body_lines).rstrip("\r\n")
+        body_lines.append(line)
     legacy = re.search(r"(.*?)```", rest, flags=re.DOTALL)
-    if legacy:
-        return legacy.group(1).strip()
-    return rest.rstrip("\r\n")
+    return legacy.group(1).strip() if legacy else rest.rstrip("\r\n")
+
+
+def _extract_fenced_block(text: str, language: str) -> str | None:
+    """Return the body of the first `` ```{language} `` … `` ``` `` region, or ``None``.
+
+    Closing fence must be alone on its line so inline `` ``` `` in code is not treated
+    as the end of the block.
+    """
+    opening = re.search(
+        rf"```\s*{re.escape(language)}\s*",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if opening is None:
+        return None
+    return _body_until_closing_fence(text[opening.end() :].lstrip("\r\n"))
 
 
 class PythonOutputParser(BaseOutputParser):
     """Extract Python code from LLM responses."""
 
-    def parse(self, text: str):
+    def parse(self, text: str) -> str:
         """Extract code from ```python``` blocks or return text as-is."""
-        extracted = _extract_python_fenced_block(text)
-        if extracted is not None:
-            return extracted.strip()
-        return text
+        body = _extract_fenced_block(text, "python")
+        return body.strip() if body is not None else text
 
 
 def _sample_values(series: pd.Series, n: int = 3) -> list[Any]:

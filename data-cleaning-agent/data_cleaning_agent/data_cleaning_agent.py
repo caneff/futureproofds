@@ -2,7 +2,7 @@
 import logging
 import os
 from pathlib import Path
-from typing import Any, Required, TypedDict
+from typing import Required, TypedDict
 
 import pandas as pd
 from langchain_core.prompts import PromptTemplate
@@ -29,22 +29,6 @@ _PIPELINE_PROMPT_TEMPLATE = _PIPELINE_PROMPT_PATH.read_text(encoding="utf-8")
 
 _FIX_PROMPT_PATH = Path(__file__).parent / "prompts" / "data_cleaning_fix.md"
 _FIX_DATA_CLEANER_PROMPT_TEMPLATE = _FIX_PROMPT_PATH.read_text(encoding="utf-8")
-
-
-def _llm_content_str(msg: Any) -> str:
-    """Normalize LangChain chat model output to plain text."""
-    content = getattr(msg, "content", msg)
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                parts.append(str(block.get("text", "")))
-            else:
-                parts.append(str(block))
-        return "".join(parts)
-    return str(content)
 
 
 def _run_data_cleaning_generation(
@@ -95,15 +79,13 @@ def _run_data_cleaning_generation(
             "function_name",
         ],
     )
-    msg_code = (code_prompt | model).invoke(
-        {
-            "user_instructions": ui,
-            "all_datasets_summary": dataset_summary,
-            "function_name": function_name,
-        }
-    )
+    msg_code = (code_prompt | model).invoke({
+        "user_instructions": ui,
+        "all_datasets_summary": dataset_summary,
+        "function_name": function_name,
+    })
     parser = PythonOutputParser()
-    code = parser.parse(_llm_content_str(msg_code))
+    code = parser.parse(msg_code.text)
 
     file_path = None
     if log:

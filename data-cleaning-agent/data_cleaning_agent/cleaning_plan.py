@@ -1,17 +1,17 @@
-"""Cleaning plan types and summary-based defaults for the hybrid pipeline."""
+"""Cleaning plan types and summary-derived example plans for LLM prompts."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import dataclasses
 
-from data_cleaning_agent.pipeline_steps import ALL_STEP_IDS
-from data_cleaning_agent.utils import DataFrameSummary
+import data_cleaning_agent.pipeline_steps as pipeline_steps
+import data_cleaning_agent.utils as utils
 
 DEFAULT_ROW_ID_COL = "__agent_row_id__"
 DEFAULT_DROP_HIGH_MISSING_THRESHOLD = 0.4
 
 
-@dataclass
+@dataclasses.dataclass
 class CleaningPlan:
     """Validated cleaning plan for the hybrid pipeline.
 
@@ -20,8 +20,8 @@ class CleaningPlan:
     per run (threshold, dtype coercion targets, impute column lists).
     """
 
-    skip_steps: list[str] = field(default_factory=list)
-    protected_columns: list[str] = field(default_factory=list)
+    skip_steps: list[str] = dataclasses.field(default_factory=list)
+    protected_columns: list[str] = dataclasses.field(default_factory=list)
     drop_high_missing_threshold: float = DEFAULT_DROP_HIGH_MISSING_THRESHOLD
     coerce_datetime_columns: tuple[str, ...] = ()
     coerce_numeric_columns: tuple[str, ...] = ()
@@ -30,21 +30,20 @@ class CleaningPlan:
     impute_categorical_columns: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        unknown = set(self.skip_steps) - ALL_STEP_IDS
+        unknown = set(self.skip_steps) - pipeline_steps.ALL_STEP_IDS
         if unknown:
             msg = f"unknown skip_steps: {sorted(unknown)}"
             raise ValueError(msg)
 
 
 def default_plan_from_summary(
-    summary: DataFrameSummary,
+    summary: utils.DataFrameSummary,
     *,
     row_id_col: str = DEFAULT_ROW_ID_COL,
 ) -> CleaningPlan:
-    """Build a summary-driven baseline plan (coerce targets + row id protection).
+    """Build an example plan from summary flags for the plan-generation prompt.
 
-    User instructions are not interpreted here; they are passed to the LLM when
-    generating or revising a plan.
+    Not applied at pipeline runtime; the LLM must return a complete plan.
     """
     dt_cols = [n for n, c in summary.columns.items() if c.looks_date_like]
     num_cols = [n for n, c in summary.columns.items() if c.looks_numeric_string_like]

@@ -3,14 +3,8 @@ from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
-from data_cleaning_agent.utils import (
-    PythonOutputParser,
-    execute_agent_code,
-    fix_agent_code,
-    format_dataframe_summary,
-    get_dataframe_summary,
-    run_cleaner_code_on_dataframe,
-)
+
+import data_cleaning_agent.utils as utils
 
 
 @pytest.mark.unit
@@ -60,22 +54,22 @@ class TestGetDataFrameSummary:
         assert getattr(summary.columns[col], flag) is expected
 
     def test_skew_coerced_to_zero_for_single_value(self, small_numeric_df):
-        stats = get_dataframe_summary(small_numeric_df).columns["x"].numeric_stats
+        stats = utils.get_dataframe_summary(small_numeric_df).columns["x"].numeric_stats
         assert stats is not None
         assert stats.skew == 0.0
 
     def test_std_coerced_to_zero_for_single_value(self, small_numeric_df):
-        stats = get_dataframe_summary(small_numeric_df).columns["x"].numeric_stats
+        stats = utils.get_dataframe_summary(small_numeric_df).columns["x"].numeric_stats
         assert stats is not None
         assert stats.std == 0.0
 
     def test_monotonic_int_column_summarizes(self, monotonic_int_df):
-        summary = get_dataframe_summary(monotonic_int_df)
+        summary = utils.get_dataframe_summary(monotonic_int_df)
         assert summary.columns["counter"].name == "counter"
         assert summary.n_rows == len(monotonic_int_df)
 
     def test_handles_empty_dataframe(self, empty_df):
-        summary = get_dataframe_summary(empty_df)
+        summary = utils.get_dataframe_summary(empty_df)
         assert summary.n_rows == 0
         assert summary.columns["a"].missing_pct == 0.0
 
@@ -88,31 +82,31 @@ class TestFormatDataFrameSummary:
     """Unit tests for the deterministic text rendering of ``DataFrameSummary``."""
 
     def test_renders_rows_and_columns_header(self, summary):
-        text = format_dataframe_summary(summary)
+        text = utils.format_dataframe_summary(summary)
         assert "Rows: 5" in text
         assert "Columns: 6" in text
 
     def test_formatted_summary_has_no_id_like_token(self, summary):
         """Regression: summary text must not revive removed id_like metadata."""
-        text = format_dataframe_summary(summary)
+        text = utils.format_dataframe_summary(summary)
         assert "id_like" not in text
 
     def test_renders_numeric_stats_for_age(self, summary):
-        text = format_dataframe_summary(summary)
+        text = utils.format_dataframe_summary(summary)
         assert "numeric stats: min=" in text
         assert "skew=" in text
 
     def test_renders_top_categories_line_for_country(self, summary):
-        text = format_dataframe_summary(summary)
+        text = utils.format_dataframe_summary(summary)
         assert "top categories:" in text
         assert "US (" in text
 
     def test_renders_detection_line_for_signup_date(self, summary):
-        text = format_dataframe_summary(summary)
+        text = utils.format_dataframe_summary(summary)
         assert "detection: date_like=True" in text
 
     def test_omits_id_like_line_for_non_id_column(self, summary):
-        text = format_dataframe_summary(summary)
+        text = utils.format_dataframe_summary(summary)
         country_block = text.split("- country")[1].split("- signup_date")[0]
         assert "id_like" not in country_block
 
@@ -142,7 +136,7 @@ class TestPythonOutputParser:
         ],
     )
     def test_extracts_or_passes_through(self, text, expected):
-        assert PythonOutputParser().parse(text) == expected
+        assert utils.PythonOutputParser().parse(text) == expected
 
 
 @pytest.mark.unit
@@ -155,7 +149,7 @@ class TestExecuteAgentCode:
             "code": "def clean(df):\n    df['b'] = df['a'] * 2\n    return df\n",
         }
 
-        out = execute_agent_code(state, "data", "code", "result", "error", "clean")
+        out = utils.execute_agent_code(state, "data", "code", "result", "error", "clean")
 
         assert out["error"] is None
         assert out["result"] == {"a": {0: 1, 1: 2, 2: 3}, "b": {0: 2, 1: 4, 2: 6}}
@@ -169,7 +163,7 @@ class TestExecuteAgentCode:
             "code": "def clean(df):\n    return df.copy()\n",
         }
 
-        out = execute_agent_code(state, "data", "code", "result", "error", "clean")
+        out = utils.execute_agent_code(state, "data", "code", "result", "error", "clean")
 
         assert out["error"] is None
         res = out["result"]
@@ -183,7 +177,7 @@ class TestExecuteAgentCode:
             "code": "def clean(df):\n    raise ValueError('boom')\n",
         }
 
-        out = execute_agent_code(state, "data", "code", "result", "error", "clean")
+        out = utils.execute_agent_code(state, "data", "code", "result", "error", "clean")
 
         assert out["result"] is None
         assert out["error"].startswith("An error occurred during data cleaning:")
@@ -195,7 +189,7 @@ class TestExecuteAgentCode:
             "code": "def clean(df):\n    return df['missing_col']\n",
         }
 
-        out = execute_agent_code(state, "data", "code", "result", "error", "clean")
+        out = utils.execute_agent_code(state, "data", "code", "result", "error", "clean")
 
         assert out["result"] is None
         assert "missing_col" in (out["error"] or "")
@@ -207,7 +201,7 @@ class TestExecuteAgentCode:
             "code": ("def clean(df):\n    df['b'] = [1, 2, 3, 4]\n    return df\n"),
         }
 
-        out = execute_agent_code(state, "data", "code", "result", "error", "clean")
+        out = utils.execute_agent_code(state, "data", "code", "result", "error", "clean")
 
         assert out["result"] is None
         err = out["error"] or ""
@@ -221,7 +215,7 @@ class TestExecuteAgentCode:
             "code": "def clean(df):\n    _ = df['a'].str.strip()\n    return df\n",
         }
 
-        out = execute_agent_code(state, "data", "code", "result", "error", "clean")
+        out = utils.execute_agent_code(state, "data", "code", "result", "error", "clean")
 
         assert out["result"] is None
         err = out["error"] or ""
@@ -238,7 +232,7 @@ class TestExecuteAgentCode:
         with pytest.raises(
             ValueError, match="Function 'clean' not found in generated code."
         ):
-            execute_agent_code(state, "data", "code", "result", "error", "clean")
+            utils.execute_agent_code(state, "data", "code", "result", "error", "clean")
 
 
 @pytest.mark.unit
@@ -252,7 +246,7 @@ class TestFixAgentCode:
 
         state = {"code": "broken", "error": "boom", "retry_count": 0}
 
-        out = fix_agent_code(
+        out = utils.fix_agent_code(
             state,
             "code",
             "error",
@@ -273,7 +267,7 @@ class TestFixAgentCode:
         llm.__or__.return_value.invoke.return_value = "fixed code"
         state = {"code": "broken", "error": "boom", "attempts": 2}
 
-        out = fix_agent_code(
+        out = utils.fix_agent_code(
             state,
             "code",
             "error",
@@ -289,7 +283,7 @@ class TestFixAgentCode:
 def test_run_cleaner_code_on_dataframe_syntax_error_returns_tuple() -> None:
     df = pd.DataFrame({"a": [1]})
     bad = "this is not valid python syntax {{{"
-    out_df, err = run_cleaner_code_on_dataframe(bad, df, function_name="data_cleaner")
+    out_df, err = utils.run_cleaner_code_on_dataframe(bad, df, function_name="data_cleaner")
     assert out_df is None
     assert err is not None
 
@@ -297,7 +291,7 @@ def test_run_cleaner_code_on_dataframe_syntax_error_returns_tuple() -> None:
 def test_run_cleaner_code_on_dataframe_missing_function_returns_tuple() -> None:
     df = pd.DataFrame({"a": [1]})
     code = "def other_fn(df):\n    return df\n"
-    out_df, err = run_cleaner_code_on_dataframe(code, df, function_name="data_cleaner")
+    out_df, err = utils.run_cleaner_code_on_dataframe(code, df, function_name="data_cleaner")
     assert out_df is None
     assert err is not None
     assert "data_cleaner" in err or "not found" in err.lower()
