@@ -1,10 +1,11 @@
 {
   "executionEnvironments": [
     {
-      "root": "data-cleaning-agent",
+      "root": ".",
       "extraPaths": [
-        "data-cleaning-agent",
-        "data-cleaning-agent/.venv/Lib/site-packages"
+        ".",
+        ".venv/Lib/site-packages",
+        "postgres-mcp-server"
       ]
     }
   ]
