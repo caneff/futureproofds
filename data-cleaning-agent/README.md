@@ -13,7 +13,7 @@ The agent follows this workflow:
 
 ## Setup
 
-Dependencies are managed at the repo root with [uv](https://docs.astral.sh/uv/). Python 3.14 or higher is required.
+Dependencies for this app are managed with [uv](https://docs.astral.sh/uv/) in this directory (`pyproject.toml`, `uv.lock`). Python 3.14 or higher is recommended.
 
 ### Prerequisites
 
@@ -37,9 +37,15 @@ Dependencies are managed at the repo root with [uv](https://docs.astral.sh/uv/).
 
    After installation, restart your terminal.
 
-2. **Install dependencies** (from the repo root):
+2. **Install dependencies** (from this directory):
    ```bash
+   cd data-cleaning-agent
    uv sync
+   ```
+
+   Or from the repo root:
+   ```bash
+   uv run --directory data-cleaning-agent streamlit run app.py
    ```
 
 3. **Set up your OpenAI API key**:
@@ -63,7 +69,13 @@ Dependencies are managed at the repo root with [uv](https://docs.astral.sh/uv/).
 
 ### Streamlit Web Interface
 
-Run from the repo root:
+From this directory:
+
+```bash
+uv run streamlit run app.py
+```
+
+Or from the repo root:
 
 ```bash
 uv run streamlit run data-cleaning-agent/app.py
@@ -75,6 +87,26 @@ Then:
 2. Click **Generate cleaning plan**, review the plan JSON and step list
 3. Click **Apply Cleaning**
 4. Download the cleaned dataset
+
+### Docker
+
+Build and run from this directory. The image uses this subproject's `uv.lock` only (not the monorepo root). Do not bake secrets into the image—pass `OPENAI_API_KEY` at runtime.
+
+```bash
+cd data-cleaning-agent
+docker build -t data-cleaning-agent .
+docker run --rm -p 8501:8501 -e OPENAI_API_KEY=sk-your-key-here data-cleaning-agent
+```
+
+Open http://localhost:8501
+
+**Docker Compose** (reads `OPENAI_API_KEY` from a local `.env` file; `.env` is not copied into the image):
+
+```bash
+cp .env.example .env
+# edit .env with your key
+docker compose up --build
+```
 
 ### Python API
 
@@ -128,4 +160,4 @@ data-cleaning-agent/
 
 Prompts live under `data_cleaning_agent/prompts/`. The hybrid step order is defined in `pipeline_steps.py` and implemented in `cleaners.py`.
 
-Dependencies and the lockfile live at the repo root (`pyproject.toml` and `uv.lock`).
+Dependencies and the lockfile for this app live here (`pyproject.toml`, `uv.lock`).
