@@ -2,54 +2,36 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from pandas.api.types import is_dtype_equal
 
-from .utils import (
-    APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN,
-    first_column_as_series,
-    summarize_cleaning_row_effects,
-)
-
-logger = logging.getLogger(__name__)
+import data_cleaning_agent.utils as utils
 
 DEFAULT_NULL_TOP_K = 10
+_ROW_ID_LABEL = "synthetic alignment column (app-injected)"
 
 
 def _column_heading(name: str) -> str:
-    """Label for markdown; hide internal synthetic row-id column name."""
-    if str(name).strip() == APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN:
-        return "synthetic alignment column (app-injected)"
+    if str(name).strip() == utils.APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN:
+        return _ROW_ID_LABEL
     return str(name)
 
 
-def _series_equal_ignoring_dtype(left: pd.Series, right: pd.Series) -> bool:
-    """True when column values match for cleaning-summary purposes.
-
-    Suppresses dtype-only drift (e.g. ``int64`` vs ``int32``, ``object`` vs
-    ``string``) so the UI does not report a dtype change when the run did not
-    materially alter values.
-    """
-    if left.shape[0] != right.shape[0]:
+def _same_values(left: pd.Series, right: pd.Series) -> bool:
+    """True when values match; ignores dtype-only drift (e.g. int64 vs int32)."""
+    if len(left) != len(right):
         return False
-    if left.equals(right):
+    a = left.reset_index(drop=True)
+    b = right.reset_index(drop=True)
+    if a.equals(b):
         return True
-    left_pos = left.reset_index(drop=True)
-    right_pos = right.reset_index(drop=True)
     try:
-        pd.testing.assert_series_equal(
-            left_pos,
-            right_pos,
-            check_dtype=False,
-            check_names=False,
-        )
-    except AssertionError:
+        return bool(np.array_equal(a.to_numpy(), b.to_numpy(), equal_nan=True))
+    except (TypeError, ValueError):
         return False
-    else:
-        return True
 
 
 def build_cleaning_outcome_facts(
@@ -74,75 +56,48 @@ def build_cleaning_outcome_facts(
     if null_top_k < 1:
         raise ValueError("null_top_k must be at least 1")
 
-    bcols = set(df_before.columns)
-    acols = set(df_after.columns)
-    dropped = sorted(bcols - acols)
-    added = sorted(acols - bcols)
-    shared = sorted(bcols & acols)
+    before_cols = set(df_before.columns)
+    after_cols = set(df_after.columns)
+    dropped = sorted(before_cols - after_cols)
+    added = sorted(after_cols - before_cols)
 
     dtype_changed: list[dict[str, str]] = []
-    for name in shared:
-        if name == row_id_col:
-            continue
-        b_ser = first_column_as_series(df_before, name)
-        a_ser = first_column_as_series(df_after, name)
-        if is_dtype_equal(b_ser.dtype, a_ser.dtype):
-            continue
-        if _series_equal_ignoring_dtype(b_ser, a_ser):
-            continue
-        dtype_changed.append(
-            {
-                "name": name,
-                "before_dtype": str(b_ser.dtype),
-                "after_dtype": str(a_ser.dtype),
-            }
-        )
-
     null_deltas: list[dict[str, Any]] = []
-    for name in shared:
+
+    for name in sorted(before_cols & after_cols):
         if name == row_id_col:
             continue
-        bmiss = int(first_column_as_series(df_before, name).isna().sum())
-        amiss = int(first_column_as_series(df_after, name).isna().sum())
-        delta = amiss - bmiss
-        if delta != 0:
-            null_deltas.append(
-                {
-                    "column": name,
-                    "missing_before": bmiss,
-                    "missing_after": amiss,
-                    "delta": delta,
-                }
-            )
-    null_deltas.sort(key=lambda r: abs(r["delta"]), reverse=True)
+        before = utils.first_column_as_series(df_before, name)
+        after = utils.first_column_as_series(df_after, name)
+        if not is_dtype_equal(before.dtype, after.dtype) and not _same_values(
+            before, after
+        ):
+            dtype_changed.append({
+                "name": name,
+                "before_dtype": str(before.dtype),
+                "after_dtype": str(after.dtype),
+            })
+        delta = int(after.isna().sum()) - int(before.isna().sum())
+        if delta:
+            null_deltas.append({
+                "column": name,
+                "missing_before": int(before.isna().sum()),
+                "missing_after": int(after.isna().sum()),
+                "delta": delta,
+            })
+
+    null_deltas.sort(key=lambda row: abs(row["delta"]), reverse=True)
     null_deltas = null_deltas[:null_top_k]
 
-    drop_reasons: list[dict[str, str]] = [
-        {"column": col, "tag": "dropped"} for col in dropped
-    ]
-
-    aligned = row_id_col in df_before.columns and row_id_col in df_after.columns
+    row_stats = utils.summarize_cleaning_row_effects(
+        df_before, df_after, row_id_col=row_id_col
+    )
     rows: dict[str, Any] = {
-        "n_before": int(len(df_before)),
-        "n_after": int(len(df_after)),
-        "aligned": aligned,
-        "removed_total": None,
-        "added_rows_only_in_after": None,
+        "n_before": row_stats["n_in"],
+        "n_after": row_stats["n_out"],
+        "rows_removed_by_id": row_stats["rows_removed_by_id"],
+        "rows_added_by_id": row_stats["rows_added_by_id"],
     }
-    if aligned:
-        try:
-            stats = summarize_cleaning_row_effects(
-                df_before, df_after, row_id_col=row_id_col
-            )
-            rows["removed_total"] = int(stats.get("removed_total", 0))
-            in_ids = set(first_column_as_series(df_before, row_id_col).tolist())
-            out_ids = set(first_column_as_series(df_after, row_id_col).tolist())
-            rows["added_rows_only_in_after"] = int(len(out_ids - in_ids))
-        except (TypeError, ValueError, KeyError) as e:
-            logger.warning("Row effect summary skipped: %s", e)
-            rows["aligned"] = False
-            rows["removed_total"] = None
-            rows["added_rows_only_in_after"] = None
 
     return {
         "rows": rows,
@@ -152,37 +107,41 @@ def build_cleaning_outcome_facts(
             "dtype_changed": dtype_changed,
         },
         "null_deltas": null_deltas,
-        "drop_reasons": drop_reasons,
     }
 
 
 def outcome_facts_show_any_change(facts: dict[str, Any]) -> bool:
-    """True when before/after differ in shape, columns, dtypes, nulls, or drop tags."""
-    rows = facts.get("rows") or {}
-    if int(rows.get("n_before", 0)) != int(rows.get("n_after", 0)):
+    """True when before/after differ in shape, columns, dtypes, or null counts."""
+    rows = facts["rows"]
+    if rows["n_before"] != rows["n_after"]:
         return True
-    cols = facts.get("columns") or {}
-    if cols.get("dropped") or cols.get("added") or cols.get("dtype_changed"):
+    if rows.get("rows_removed_by_id") or rows.get("rows_added_by_id"):
         return True
-    if facts.get("null_deltas"):
+    cols = facts["columns"]
+    if cols["dropped"] or cols["added"] or cols["dtype_changed"]:
         return True
-    if facts.get("drop_reasons"):
-        return True
-    return False
+    return bool(facts["null_deltas"])
 
 
 def format_outcome_summary_markdown(facts: dict[str, Any]) -> str:
     """Return markdown for Streamlit."""
     lines: list[str] = []
-    r = facts["rows"]
+    rows = facts["rows"]
     lines.append("**Rows**")
-    lines.append(f"- Row count: **{r['n_before']:,}** → **{r['n_after']:,}**")
+    lines.append(f"- Row count: **{rows['n_before']:,}** → **{rows['n_after']:,}**")
+    if rows.get("rows_removed_by_id") is not None:
+        lines.append(
+            f"- Row ids removed (upload only): **{rows['rows_removed_by_id']:,}**"
+        )
+        lines.append(
+            f"- Row ids added (cleaned only): **{rows['rows_added_by_id']:,}**"
+        )
 
     cols = facts["columns"]
     lines.append("")
     lines.append("**Columns**")
-    dropped = cols.get("dropped") or []
-    added = cols.get("added") or []
+    dropped = cols["dropped"]
+    added = cols["added"]
     lines.append(
         f"- Dropped ({len(dropped)}): "
         + (", ".join(f"`{_column_heading(c)}`" for c in dropped) if dropped else "—")
@@ -192,36 +151,23 @@ def format_outcome_summary_markdown(facts: dict[str, Any]) -> str:
         + (", ".join(f"`{_column_heading(c)}`" for c in added) if added else "—")
     )
 
-    dtc = cols.get("dtype_changed") or []
-    if dtc:
+    dtype_changed = cols["dtype_changed"]
+    if dtype_changed:
         lines.append("")
         lines.append("**Dtype Changes**")
-        for e in dtc:
+        for entry in dtype_changed:
             lines.append(
-                f"- `{_column_heading(e['name'])}`: `{e['before_dtype']}` → `{e['after_dtype']}`"
+                f"- `{_column_heading(entry['name'])}`: "
+                f"`{entry['before_dtype']}` → `{entry['after_dtype']}`"
             )
 
-    nd = facts.get("null_deltas") or []
-    if nd:
+    if facts["null_deltas"]:
         lines.append("")
         lines.append("**Missing Value Count Changes (Top by |Δ|)**")
-        for row in nd:
+        for row in facts["null_deltas"]:
             lines.append(
                 f"- `{_column_heading(row['column'])}`: {row['missing_before']} → "
                 f"{row['missing_after']} (Δ {row['delta']:+d})"
-            )
-
-    dr = facts.get("drop_reasons") or []
-    if dr:
-        lines.append("")
-        lines.append("**Dropped Columns (Tags)**")
-        tag_text = {
-            "dropped": "column absent on cleaned output compared to upload",
-        }
-        for item in dr:
-            tag = item.get("tag", "dropped")
-            lines.append(
-                f"- `{_column_heading(item['column'])}`: **{tag}** — {tag_text.get(tag, tag)}"
             )
 
     return "\n".join(lines)

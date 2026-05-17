@@ -72,28 +72,32 @@ def summarize_cleaning_row_effects(
     Returns
     -------
     dict
-        Keys: ``n_in``, ``n_out``, ``removed_total``, and optionally
-        ``removed_all_null_input_user_cols`` (int or None).
+        Keys: ``n_in``, ``n_out``, ``removed_total``, ``rows_removed_by_id``,
+        ``rows_added_by_id`` (id counts are ``None`` when ``row_id_col`` is absent
+        in either frame), and optionally ``removed_all_null_input_user_cols``.
     """
     n_in = len(df_before)
     n_out = len(df_after)
-    removed_total = n_in - n_out
     result: dict[str, Any] = {
         "n_in": n_in,
         "n_out": n_out,
-        "removed_total": removed_total,
+        "removed_total": n_in - n_out,
+        "rows_removed_by_id": None,
+        "rows_added_by_id": None,
         "removed_all_null_input_user_cols": None,
     }
     if row_id_col not in df_before.columns or row_id_col not in df_after.columns:
-        return result
-    user_cols = [c for c in df_before.columns if c != row_id_col]
-    if not user_cols:
-        result["removed_all_null_input_user_cols"] = 0
         return result
     try:
         in_ids = set(first_column_as_series(df_before, row_id_col).tolist())
         out_ids = set(first_column_as_series(df_after, row_id_col).tolist())
     except _EXC_ROW_ID_SET_COERCION:
+        return result
+    result["rows_removed_by_id"] = len(in_ids - out_ids)
+    result["rows_added_by_id"] = len(out_ids - in_ids)
+    user_cols = [c for c in df_before.columns if c != row_id_col]
+    if not user_cols:
+        result["removed_all_null_input_user_cols"] = 0
         return result
     dropped_ids = list(in_ids - out_ids)
     dropped_mask = first_column_as_series(df_before, row_id_col).isin(dropped_ids)

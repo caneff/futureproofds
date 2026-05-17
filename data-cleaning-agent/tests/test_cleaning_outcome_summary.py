@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+
 from data_cleaning_agent.cleaning_outcome_summary import (
     build_cleaning_outcome_facts,
     format_outcome_summary_markdown,
@@ -12,13 +13,11 @@ from data_cleaning_agent.utils import APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN
 
 
 @pytest.mark.unit
-def test_dropped_column_lists_drop_reason():
+def test_dropped_column_listed_in_facts():
     df_before = pd.DataFrame({"a": range(10), "drop_me": ["", ""] * 5})
     df_after = df_before.drop(columns=["drop_me"])
     facts = build_cleaning_outcome_facts(df_before, df_after, row_id_col="__missing__")
     assert "drop_me" in facts["columns"]["dropped"]
-    tags = {t["column"]: t["tag"] for t in facts["drop_reasons"]}
-    assert tags.get("drop_me") == "dropped"
 
 
 @pytest.mark.unit
@@ -27,8 +26,7 @@ def test_dtype_changed_on_shared_column():
     df_after = pd.DataFrame({"x": [1, 2, 3]})
     facts = build_cleaning_outcome_facts(df_before, df_after, row_id_col="__missing__")
     assert len(facts["columns"]["dtype_changed"]) >= 1
-    entry = facts["columns"]["dtype_changed"][0]
-    assert entry["name"] == "x"
+    assert facts["columns"]["dtype_changed"][0]["name"] == "x"
 
 
 @pytest.mark.unit
@@ -41,7 +39,7 @@ def test_dtype_drift_suppressed_when_values_match():
 
 
 @pytest.mark.unit
-def test_format_omits_empty_dtype_nulls_and_drop_reason_sections():
+def test_format_omits_empty_dtype_and_null_sections():
     facts = build_cleaning_outcome_facts(
         pd.DataFrame({"x": [1, 2]}),
         pd.DataFrame({"x": [1, 2]}),
@@ -50,33 +48,10 @@ def test_format_omits_empty_dtype_nulls_and_drop_reason_sections():
     text = format_outcome_summary_markdown(facts)
     assert "**Dtype Changes**" not in text
     assert "**Missing Value Count Changes" not in text
-    assert "**Dropped Columns (Tags)**" not in text
-
-
-@pytest.mark.unit
-def test_rows_section_uses_summarize_when_row_id_present():
-    rid = "__agent_row_id__"
-    df_before = pd.DataFrame({rid: [0, 1, 2], "v": [1, 2, 3]})
-    df_after = pd.DataFrame({rid: [0, 1], "v": [1, 2]})
-    facts = build_cleaning_outcome_facts(df_before, df_after, row_id_col=rid)
-    assert facts["rows"]["aligned"] is True
-    assert facts["rows"]["n_before"] == 3
-    assert facts["rows"]["n_after"] == 2
-    assert facts["rows"]["removed_total"] == 1
-
-
-@pytest.mark.unit
-def test_rows_aligned_false_when_row_id_missing_in_after():
-    rid = "__agent_row_id__"
-    df_before = pd.DataFrame({rid: [0, 1], "v": [1, 2]})
-    df_after = pd.DataFrame({"v": [1, 2]})
-    facts = build_cleaning_outcome_facts(df_before, df_after, row_id_col=rid)
-    assert facts["rows"]["aligned"] is False
 
 
 @pytest.mark.unit
 def test_build_facts_survives_duplicate_column_label_on_shared_name():
-    """Duplicate labels make df[name] a DataFrame; summary must not use ambiguous truth."""
     df_before = pd.DataFrame(np.ones((2, 2)))
     df_before.columns = ["a", "a"]
     df_after = df_before.copy()
@@ -88,22 +63,40 @@ def test_build_facts_survives_duplicate_column_label_on_shared_name():
 def test_format_redacts_internal_row_id_column_name_in_lists():
     rid = APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN
     facts = {
-        "rows": {
-            "n_before": 2,
-            "n_after": 2,
-            "aligned": False,
-            "removed_total": None,
-            "added_rows_only_in_after": None,
-        },
+        "rows": {"n_before": 2, "n_after": 2},
         "columns": {"dropped": [rid, "x"], "added": [], "dtype_changed": []},
         "null_deltas": [
             {"column": rid, "missing_before": 0, "missing_after": 1, "delta": 1}
         ],
-        "drop_reasons": [{"column": rid, "tag": "dropped"}],
     }
     text = format_outcome_summary_markdown(facts)
     assert rid not in text
     assert "synthetic alignment column (app-injected)" in text
+
+
+@pytest.mark.unit
+def test_rows_section_includes_id_counts_when_row_id_present():
+    rid = APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN
+    df_before = pd.DataFrame({rid: [0, 1, 2], "v": [1, 2, 3]})
+    df_after = pd.DataFrame({rid: [0, 1], "v": [1, 2]})
+    facts = build_cleaning_outcome_facts(df_before, df_after, row_id_col=rid)
+    assert facts["rows"]["rows_removed_by_id"] == 1
+    assert facts["rows"]["rows_added_by_id"] == 0
+    text = format_outcome_summary_markdown(facts)
+    assert "Row ids removed" in text
+    assert "Row ids added" in text
+
+
+@pytest.mark.unit
+def test_outcome_facts_show_any_change_true_when_id_churn_same_row_count():
+    rid = APP_SYNTHETIC_ALIGN_ROW_ID_COLUMN
+    df_before = pd.DataFrame({rid: ["0", "1"], "v": [1, 2]})
+    df_after = pd.DataFrame({rid: ["0", "2"], "v": [1, 3]})
+    facts = build_cleaning_outcome_facts(df_before, df_after, row_id_col=rid)
+    assert facts["rows"]["n_before"] == facts["rows"]["n_after"]
+    assert facts["rows"]["rows_removed_by_id"] == 1
+    assert facts["rows"]["rows_added_by_id"] == 1
+    assert outcome_facts_show_any_change(facts) is True
 
 
 @pytest.mark.unit
