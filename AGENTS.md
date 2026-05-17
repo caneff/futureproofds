@@ -1,28 +1,28 @@
 # AGENTS.md
 
 ## Project Guidelines
-- For **small** edits (localized fix, a handful of lines in one file, obvious typo), a short numbered plan in chat is enough before editing.
-- For **larger** work—roughly **multiple files**, a **new feature**, **refactors**, or **on the order of tens of lines or more** across the change—**switch to Plan mode first**, write the plan there, and **wait for agreement** before implementing. Do **not** apply large or wide-ranging diffs without the user having seen and accepted the plan.
+
 - Keep changes minimal and avoid overengineering.
-- Remove temporary or large data files, never commit datasets.
+- Remove temporary or large data files; never commit datasets.
 
 ## Conventions
+
 - Python: PEP8 style, Ruff linting, NumPy-style docstrings.
-- Use pytest for testing, prefer pandas/NumPy/scikit-learn for analysis, plotly and dash for visualization.
+- Use pytest for testing; prefer pandas/NumPy for data work, plotly for charts, and dash for dashboards.
+- Use `uv run` for all Python execution (see the user `uv` skill under `~/.cursor/skills/uv/` when available).
+- Prefer doing `import {packagename}` instead of `from {packagename} import {functionname}`
 - Jupyter notebooks must remain reproducible: no hard-coded paths, use relative paths.
 
 ## Agent Instructions
-- **Specs and design docs:** **Never commit** design specs, implementation plans, or brainstorming write-ups. Write them only under the user Cursor folder outside this repo (`~/.cursor/superpowers/<repo-slug>/specs/` and `.../plans/`). Do not add tracked `docs/**` spec trees or copy specs into the codebase. If the user wants a spec shared, they paste or attach it; agents do not commit specs.
-- When in doubt whether a change is "small," treat it as large: plan first, then implement after confirmation.
-- Run `pytest -q` after changes and share results.
+
+- Run `uv run pytest -q` after changes and share results.
 - Confirm before installing new dependencies.
-- Never write secrets, always use environment variables.
-- Always follow the git-workflow-and-versioning skill when committing code or managing branches.
-- **`main` / default branch:** Do **not** merge into `main`, do **not** `git push origin main` (or otherwise publish agent work to the remote default branch), and do **not** treat vague phrasing (“merge,” “commit and merge”) as permission to do so. **Only** when the user **explicitly** asks (e.g. “merge to main,” “push to main,” “ship to main”) may an agent integrate to `main`. Otherwise use a feature branch and push **that branch only**; the user merges (e.g. via PR).
-- Use the PostgreSQL MCP Server tools when querying over creating new code yourself.
-- When asked for visualizations, prefer making jupyter notebooks over scripts that generate raw html.
+- Never write secrets; always use environment variables.
+- **`main` / default branch:** Do not merge into `main` or `git push origin main` unless the user explicitly asks (e.g. “push to main,” “ship to main”). Otherwise use a feature branch and push that branch only.
 
 ## Testing
+
 - Use pytest for unit tests.
 - Keep unit tests short, easy to read, and small in scope.
 - Use descriptive names for each test.
+- Use parameterized tests wherever possible.
