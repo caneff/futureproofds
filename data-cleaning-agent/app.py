@@ -79,7 +79,7 @@ if uploaded_file:
 
     if st.button(gen_label):
         with st.spinner("Generating cleaning plan..."):
-            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+            llm = ChatOpenAI(**{"model": "gpt-4o-mini", "temperature": 0})
             agent = LightweightDataCleaningAgent(model=llm)
             df_input = df_uploaded.copy()
             df_input.insert(0, AGENT_ROW_ID, _synthetic_row_id_series(df_input.index))
