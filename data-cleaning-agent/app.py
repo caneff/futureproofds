@@ -1,7 +1,5 @@
 """Streamlit interface for the Data Cleaning Agent."""
 
-import json
-
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
@@ -13,8 +11,7 @@ from data_cleaning_agent.cleaning_outcome_summary import (
     format_outcome_summary_markdown,
     outcome_facts_show_any_change,
 )
-from data_cleaning_agent.cleaning_plan import CleaningPlan
-from data_cleaning_agent.pipeline_steps import PIPELINE_STEP_ORDER
+from data_cleaning_agent.cleaning_plan import format_plan_summary_markdown
 from preview_helpers import (
     AGENT_ROW_ID,
     preview_aligned_frames,
@@ -35,19 +32,6 @@ def _normalize_cleaned_row_id(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     out[AGENT_ROW_ID] = out[AGENT_ROW_ID].astype(str)
     return out
-
-
-def _format_pipeline_step_summary(plan: CleaningPlan) -> str:
-    """Human-readable pipeline steps with skips marked."""
-    skips = set(plan.skip_steps)
-    lines: list[str] = []
-    for step in PIPELINE_STEP_ORDER:
-        step_id = step.value
-        if step_id in skips:
-            lines.append(f"- ~~{step_id}~~ (skipped)")
-        else:
-            lines.append(f"- {step_id}")
-    return "\n".join(lines)
 
 
 load_dotenv()
@@ -124,26 +108,13 @@ if uploaded_file:
     df_input_stored = st.session_state.get("preview_df_input")
 
     if pending_plan and df_input_stored is not None:
-        plan_json = json.dumps(
-            {
-                "skip_steps": list(pending_plan.skip_steps),
-                "protected_columns": list(pending_plan.protected_columns),
-                "drop_high_missing_threshold": pending_plan.drop_high_missing_threshold,
-                "coerce_datetime_columns": list(pending_plan.coerce_datetime_columns),
-                "coerce_numeric_columns": list(pending_plan.coerce_numeric_columns),
-                "coerce_bool_columns": list(pending_plan.coerce_bool_columns),
-                "impute_numeric_columns": list(pending_plan.impute_numeric_columns),
-                "impute_categorical_columns": list(
-                    pending_plan.impute_categorical_columns
-                ),
-            },
-            indent=2,
-        )
         with st.expander("Generated cleaning plan", expanded=False):
-            st.markdown("**Pipeline steps**")
-            st.markdown(_format_pipeline_step_summary(pending_plan))
-            st.markdown("**Plan JSON**")
-            st.code(plan_json, language="json")
+            st.markdown(
+                format_plan_summary_markdown(
+                    pending_plan,
+                    row_id_col=AGENT_ROW_ID,
+                )
+            )
 
         if st.button("Apply Cleaning"):
             apply_err: str | None = None
