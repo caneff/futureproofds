@@ -180,7 +180,9 @@ def diff_cell_mask(before: pd.DataFrame, after: pd.DataFrame) -> pd.DataFrame | 
         return None
     if before.shape != after.shape or not before.columns.equals(after.columns):
         return None
-    return ~(before.eq(after) | (before.isna() & after.isna()))
+    same = before.eq(after) | (before.isna() & after.isna())
+    # ``eq`` can yield NA on nullable/object columns; treat NA as "not equal".
+    return (~same.fillna(False)).astype(bool)
 
 
 def style_preview_pair(
@@ -198,7 +200,8 @@ def style_preview_pair(
 
     def _highlight_row(row: pd.Series) -> list[str]:
         idx = row.name
-        return [_PREVIEW_DIFF_BG if bool(mask.at[idx, c]) else "" for c in row.index]
+        # Truthiness, not ``is True``: mask values are ``numpy.bool_`` after astype(bool).
+        return [_PREVIEW_DIFF_BG if mask.at[idx, c] else "" for c in row.index]
 
     b_h = br.style.apply(_highlight_row, axis=1)
     a_h = ar.style.apply(_highlight_row, axis=1)

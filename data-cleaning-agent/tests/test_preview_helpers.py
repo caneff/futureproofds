@@ -2,12 +2,14 @@
 
 import pandas as pd
 import pytest
+
 from preview_helpers import (
     AGENT_ROW_ID,
     diff_cell_mask,
     preview_aligned_frames,
     reorder_cleaned_for_export,
     round_numeric_preview,
+    style_preview_pair,
 )
 
 
@@ -37,6 +39,32 @@ def test_diff_cell_mask_nan_safe():
     assert m is not None
     assert m.iloc[0].tolist() == [False, False]
     assert m.iloc[1].tolist() == [True, False]
+
+
+@pytest.mark.unit
+def test_diff_cell_mask_no_na_in_result_for_nullable_string():
+    before = pd.DataFrame({"a": pd.array(["x", None], dtype="string")})
+    after = pd.DataFrame({"a": pd.array(["y", None], dtype="string")})
+    mask = diff_cell_mask(before, after)
+    assert mask is not None
+    assert mask.dtypes.eq(bool).all()
+    assert not mask.isna().any().any()
+
+
+@pytest.mark.unit
+def test_style_preview_pair_does_not_raise_on_nullable_na():
+    before = pd.DataFrame({"a": pd.array(["x", None], dtype="string")})
+    after = pd.DataFrame({"a": pd.array(["y", None], dtype="string")})
+    style_preview_pair(before, after)
+
+
+@pytest.mark.unit
+def test_style_preview_pair_highlights_differing_cells():
+    before = pd.DataFrame({"x": [1.0, 2.0]})
+    after = pd.DataFrame({"x": [1.0, 3.0]})
+    before_disp, _after_disp = style_preview_pair(before, after)
+    html = before_disp.to_html()
+    assert "rgba(255, 230, 120" in html
 
 
 @pytest.mark.unit
