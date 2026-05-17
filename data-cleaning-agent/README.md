@@ -1,16 +1,15 @@
 # Data Cleaning Agent
 
-An AI-powered data cleaning agent that automatically cleans messy datasets using LangChain and LangGraph. The agent uses an LLM to generate and execute Python code for common data cleaning tasks like handling missing values, removing duplicates, and dropping low-quality columns.
+An AI-powered data cleaning agent that uses LangChain and LangGraph to produce a JSON **CleaningPlan**, then runs a fixed hybrid pandas pipeline (no generated Python or `exec`).
 
 ## How It Works
 
-The agent follows a simple workflow:
-1. **Analyze**: Examines your dataset structure and identifies data quality issues
-2. **Generate**: Uses an LLM to create custom Python cleaning code based on the data
-3. **Execute**: Runs the generated code to clean your data
-4. **Retry**: Automatically fixes errors if the generated code fails (up to 3 attempts)
+The agent follows this workflow:
 
-This approach combines the flexibility of LLMs with the reliability of pandas operations.
+1. **Analyze**: Summarizes your dataset (dtypes, missingness, detection flags).
+2. **Plan**: The LLM returns a validated `CleaningPlan` (step skips, protected columns, coerce/impute lists).
+3. **Execute**: Python runs steps in fixed order via `run_cleaning_pipeline`.
+4. **Retry**: On validation or runtime errors, the LLM corrects the plan (up to 3 attempts).
 
 ## Setup
 
@@ -43,8 +42,6 @@ Dependencies are managed at the repo root with [uv](https://docs.astral.sh/uv/).
    uv sync
    ```
 
-   This will resolve and install all dependencies from `uv.lock`, ensuring consistency across all environments.
-
 3. **Set up your OpenAI API key**:
 
    **Windows**:
@@ -66,53 +63,50 @@ Dependencies are managed at the repo root with [uv](https://docs.astral.sh/uv/).
 
 ### Streamlit Web Interface
 
-The easiest way to use the agent is through the web interface (run from the repo root):
+Run from the repo root:
 
 ```bash
 uv run streamlit run data-cleaning-agent/app.py
 ```
 
 Then:
+
 1. Upload your CSV file
-2. Click "Clean Data"
-3. Download the cleaned dataset
+2. Click **Generate cleaning plan**, review the plan JSON and step list
+3. Click **Apply Cleaning**
+4. Download the cleaned dataset
 
 ### Python API
-
-For programmatic use or integration into data pipelines:
 
 ```python
 import pandas as pd
 from langchain_openai import ChatOpenAI
 from data_cleaning_agent import LightweightDataCleaningAgent
 
-# Initialize the agent with an LLM
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 agent = LightweightDataCleaningAgent(model=llm)
 
-# Load your messy data
 df = pd.read_csv("your_data.csv")
-
-# Run the cleaning agent
 agent.invoke_agent(source_df=df)
-
-# Get the cleaned dataset
 cleaned_df = agent.get_data_cleaned()
-
-# Save or use the cleaned data
 cleaned_df.to_csv("cleaned_data.csv", index=False)
 ```
 
-**Optional: Provide custom instructions**
+**Optional: custom instructions**
 
 ```python
-# End-user cleaning instructions (columns named here are protected)
 agent.invoke_agent(
     source_df=df,
-    user_instructions="Remove columns with more than 30% missing values and standardize date formats",
+    user_instructions="Protect country; drop columns with more than 30% missing values",
 )
+```
 
-# Synthetic row id rules for alignment are in ``data_cleaning.md``; no separate host prompt slot.
+**Generate plan only, apply later**
+
+```python
+agent.generate_cleaning_plan(source_df=df, user_instructions="Protect country")
+plan = agent.get_cleaning_plan()
+result = agent.execute_stored_cleaning(source_df=df)
 ```
 
 ## Project Structure
@@ -120,23 +114,18 @@ agent.invoke_agent(
 ```
 data-cleaning-agent/
 ├── data_cleaning_agent/
-│   ├── __init__.py
-│   ├── data_cleaning_agent.py  # Main agent class
+│   ├── cleaning_plan.py          # CleaningPlan schema
+│   ├── cleaning_pipeline.py      # Fixed-order pipeline
+│   ├── plan_generation.py        # LLM plan JSON parse/generate/fix
+│   ├── data_cleaning_agent.py    # LangGraph agent
 │   ├── prompts/
-│   │   ├── data_cleaning.md                 # LLM call: Python cleaning pipeline
-│   │   └── data_cleaning_fix.md             # Error-correction prompt (Python only)
-│   └── utils.py                # Utility functions
-├── app.py                      # Streamlit interface
+│   │   ├── data_cleaning_plan.md
+│   │   └── data_cleaning_plan_fix.md
+│   └── utils.py                  # DataFrame summary for prompts
+├── app.py                        # Streamlit interface
 └── README.md
 ```
 
-Generation uses **one** LLM round-trip: Python cleaning code from
-[`data_cleaning_agent/prompts/data_cleaning.md`](data_cleaning_agent/prompts/data_cleaning.md).
-If execution fails, the fix prompt in
-[`data_cleaning_agent/prompts/data_cleaning_fix.md`](data_cleaning_agent/prompts/data_cleaning_fix.md)
-returns corrected Python only (no JSON plan).
-
-The default 14-step pipeline that runs when no `user_instructions` are
-provided is defined in that same `data_cleaning.md` file.
+Prompts live under `data_cleaning_agent/prompts/`. The hybrid step order is defined in `pipeline_steps.py` and implemented in `cleaners.py`.
 
 Dependencies and the lockfile live at the repo root (`pyproject.toml` and `uv.lock`).

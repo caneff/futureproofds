@@ -1,13 +1,11 @@
 # Utility functions for lightweight data cleaning agent
 
 import logging
-import re
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 import pandas as pd
-from langchain_core.output_parsers import BaseOutputParser
 
 logger = logging.getLogger(__name__)
 
@@ -34,56 +32,6 @@ _BOOL_LIKE_TOKENS = frozenset({
     "0",
     "1",
 })
-
-
-def run_cleaner_code_on_dataframe(
-    code: str,
-    df: pd.DataFrame,
-    *,
-    function_name: str = "data_cleaner",
-) -> tuple[pd.DataFrame | None, str | None]:
-    """
-    Execute generated cleaner code once on ``df``.
-
-    Parameters
-    ----------
-    code
-        Full Python source defining ``function_name``.
-    df
-        Input frame (same contract as ``execute_stored_cleaning``).
-    function_name
-        Name of the callable to invoke from ``code``.
-
-    Returns
-    -------
-    tuple
-        ``(cleaned_df, None)`` on success, or ``(None, error_message)`` on failure.
-        Never raises: ``exec``/syntax errors and missing cleaner functions are
-        returned as ``(None, message)``.
-    """
-    state = {
-        "source_df": df.to_dict(),
-        "data_cleaner_function": code,
-        "data_cleaner_function_name": function_name,
-    }
-    try:
-        out = execute_agent_code(
-            state=state,
-            data_key="source_df",
-            result_key="data_cleaned",
-            error_key="data_cleaner_error",
-            code_snippet_key="data_cleaner_function",
-            agent_function_name=function_name,
-        )
-    except Exception as exc:
-        return None, str(exc)
-    err = out.get("data_cleaner_error")
-    if err:
-        return None, str(err)
-    raw = out.get("data_cleaned")
-    if raw is None:
-        return None, "cleaner returned no result"
-    return pd.DataFrame.from_dict(raw), None
 
 
 def first_column_as_series(df: pd.DataFrame, name: str) -> pd.Series:
@@ -202,45 +150,6 @@ class DataFrameSummary:
     n_rows: int
     n_cols: int
     columns: dict[str, ColumnSummary]
-
-
-_CLOSING_FENCE_LINE = re.compile(r"\s*```\s*")
-
-
-def _body_until_closing_fence(rest: str) -> str:
-    """Collect lines until a line that is only a closing fence."""
-    body_lines: list[str] = []
-    for line in rest.splitlines(keepends=True):
-        if _CLOSING_FENCE_LINE.fullmatch(line.rstrip("\r\n")):
-            return "".join(body_lines).rstrip("\r\n")
-        body_lines.append(line)
-    legacy = re.search(r"(.*?)```", rest, flags=re.DOTALL)
-    return legacy.group(1).strip() if legacy else rest.rstrip("\r\n")
-
-
-def _extract_fenced_block(text: str, language: str) -> str | None:
-    """Return the body of the first `` ```{language} `` … `` ``` `` region, or ``None``.
-
-    Closing fence must be alone on its line so inline `` ``` `` in code is not treated
-    as the end of the block.
-    """
-    opening = re.search(
-        rf"```\s*{re.escape(language)}\s*",
-        text,
-        flags=re.IGNORECASE,
-    )
-    if opening is None:
-        return None
-    return _body_until_closing_fence(text[opening.end() :].lstrip("\r\n"))
-
-
-class PythonOutputParser(BaseOutputParser):
-    """Extract Python code from LLM responses."""
-
-    def parse(self, text: str) -> str:
-        """Extract code from ```python``` blocks or return text as-is."""
-        body = _extract_fenced_block(text, "python")
-        return body.strip() if body is not None else text
 
 
 def _sample_values(series: pd.Series, n: int = 3) -> list[Any]:
@@ -390,8 +299,8 @@ def format_dataframe_summary(summary: DataFrameSummary) -> str:
     Produces the string interpolated into the ``{all_datasets_summary}`` slot of
     the cleaning prompt. Lines are emitted only when relevant (numeric stats
     only for numeric columns, top categories only when populated, detection only
-    when at least one flag is True). Imputation choices are defined only in the
-    pipeline prompt and implemented in generated code, not in this summary.
+    when at least one flag is True). Imputation choices are defined in the plan
+    prompt and applied by the hybrid pipeline, not in this summary.
 
     Parameters
     ----------
@@ -440,149 +349,3 @@ def format_dataframe_summary(summary: DataFrameSummary) -> str:
             )
         lines.append("")
     return "\n".join(lines).rstrip()
-
-
-def execute_agent_code(
-    state, data_key, code_snippet_key, result_key, error_key, agent_function_name
-):
-    """
-    Execute the generated agent code on the data.
-
-    Parameters
-    ----------
-    state : dict
-        The current state containing data and code.
-    data_key : str
-        Key in state where the input data is stored.
-    code_snippet_key : str
-        Key in state where the generated code is stored.
-    result_key : str
-        Key to store the result in.
-    error_key : str
-        Key to store any error message in.
-    agent_function_name : str
-        Name of the function to execute from the generated code.
-
-    Returns
-    -------
-    dict
-        Dictionary with result and error keys.
-    """
-    logger.info("Executing agent code")
-
-    data = state.get(data_key)
-    agent_code = state.get(code_snippet_key)
-    df = pd.DataFrame.from_dict(data)
-
-    # exec() runs LLM-generated code in an isolated namespace; only use with trusted models.
-    local_vars = {}
-    global_vars = {}
-    exec(agent_code, global_vars, local_vars)
-
-    agent_function = local_vars.get(agent_function_name)
-    if not agent_function or not callable(agent_function):
-        raise ValueError(
-            f"Function '{agent_function_name}' not found in generated code."
-        )
-
-    agent_error = None
-    result = None
-    try:
-        result = agent_function(df)
-        if isinstance(result, pd.DataFrame):
-            result = result.to_dict()
-    except KeyError as e:
-        logger.error("Execution failed: %s", e)
-        agent_error = (
-            "An error occurred during data cleaning: missing column or label "
-            f"{str(e)!r}. If this name was removed in pipeline steps 3 or 7 (high "
-            "missingness, constant, or all-null), the cleaner must not reference "
-            "it in later steps—use only columns still on df after those drops."
-        )
-    except Exception as e:
-        logger.error("Execution failed: %s", e)
-        msg = str(e)
-        hint = ""
-        if "Length of values" in msg and "length of index" in msg.lower():
-            hint = (
-                " Hint: a column assignment used a short list/array/Series (often "
-                "`.unique()`, `.cat.categories`, or `pd.Series(list)` without "
-                "`index=df.index`). Assign a scalar, `Series(..., index=df.index)`, "
-                "or `df[other_col].copy()` so the RHS has one value per row."
-            )
-        elif ".str accessor" in msg and "string" in msg.lower():
-            hint = (
-                " Hint: `.str` was used on a non-string column. Restrict `.str` to "
-                "object/StringDtype columns (guard with `pd.api.types.is_object_dtype` / "
-                "`is_string_dtype`), or exclude numeric/datetime columns from string-only "
-                "loops."
-            )
-        agent_error = f"An error occurred during data cleaning: {msg}{hint}"
-
-    return {result_key: result, error_key: agent_error}
-
-
-def fix_agent_code(
-    state,
-    code_snippet_key,
-    error_key,
-    llm,
-    prompt_template,
-    function_name,
-    retry_count_key="retry_count",
-    output_parser: BaseOutputParser | None = None,
-):
-    """
-    Fix errors in the generated agent code using the LLM.
-
-    Parameters
-    ----------
-    state : dict
-        The current state containing code and error information.
-    code_snippet_key : str
-        Key in state where the broken code is stored.
-    error_key : str
-        Key in state where the error message is stored.
-    llm : LLM
-        The language model to use for fixing the code.
-    prompt_template : str
-        Template for the fix prompt (should have {code_snippet}, {error}, {function_name} placeholders).
-    function_name : str
-        Name of the function being fixed.
-    retry_count_key : str, optional
-        Key in state for tracking retry count. Defaults to "retry_count".
-    output_parser : BaseOutputParser, optional
-        Parser for the LLM response. Defaults to :class:`PythonOutputParser`.
-        If the parser returns a dict with a ``code`` key, that string is used as
-        the updated snippet.
-
-    Returns
-    -------
-    dict
-        Dictionary with updated code, cleared error, and incremented retry count.
-    """
-    logger.info("Fixing agent code")
-    logger.debug(f"Retry count: {state.get(retry_count_key)}")
-
-    code_snippet = state.get(code_snippet_key)
-    error_message = state.get(error_key)
-
-    prompt = prompt_template.format(
-        code_snippet=code_snippet,
-        error=error_message,
-        function_name=function_name,
-    )
-
-    parser = output_parser or PythonOutputParser()
-    response = (llm | parser).invoke(prompt)
-
-    out: dict[str, Any] = {
-        error_key: None,
-        retry_count_key: state.get(retry_count_key) + 1,
-    }
-    if isinstance(response, dict) and "code" in response:
-        out[code_snippet_key] = response["code"]
-    else:
-        out[code_snippet_key] = response
-
-    return out

@@ -1,16 +1,20 @@
 """Streamlit interface for the Data Cleaning Agent."""
 
+import json
+
 import pandas as pd
 import streamlit as st
+from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
+
 from data_cleaning_agent import LightweightDataCleaningAgent
 from data_cleaning_agent.cleaning_outcome_summary import (
     build_cleaning_outcome_facts,
     format_outcome_summary_markdown,
     outcome_facts_show_any_change,
 )
-from data_cleaning_agent.utils import run_cleaner_code_on_dataframe
-from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
+from data_cleaning_agent.cleaning_plan import CleaningPlan
+from data_cleaning_agent.pipeline_steps import PIPELINE_STEP_ORDER
 from preview_helpers import (
     AGENT_ROW_ID,
     preview_aligned_frames,
@@ -33,6 +37,19 @@ def _normalize_cleaned_row_id(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _format_pipeline_step_summary(plan: CleaningPlan) -> str:
+    """Human-readable pipeline steps with skips marked."""
+    skips = set(plan.skip_steps)
+    lines: list[str] = []
+    for step in PIPELINE_STEP_ORDER:
+        step_id = step.value
+        if step_id in skips:
+            lines.append(f"- ~~{step_id}~~ (skipped)")
+        else:
+            lines.append(f"- {step_id}")
+    return "\n".join(lines)
+
+
 load_dotenv()
 
 st.set_page_config(
@@ -50,8 +67,7 @@ if uploaded_file:
         for k in (
             "preview_df_input",
             "preview_df_cleaned",
-            "pending_cleaner_code",
-            "pending_function_name",
+            "pending_cleaning_plan",
             "cleaning_user_instructions",
         ):
             st.session_state.pop(k, None)
@@ -67,66 +83,81 @@ if uploaded_file:
             label_visibility="collapsed",
             placeholder="Optional. Describe how you want the data cleaned.",
             help=(
-                "Edit these instructions and click Generate again for new cleaning code."
+                "Edit these instructions and click Generate again for a new cleaning plan."
             ),
         )
 
     gen_label = (
-        "Generate cleaning code"
-        if not st.session_state.get("pending_cleaner_code")
+        "Generate cleaning plan"
+        if not st.session_state.get("pending_cleaning_plan")
         else "Generate again"
     )
 
     if st.button(gen_label):
-        with st.spinner("Generating code..."):
+        with st.spinner("Generating cleaning plan..."):
             llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-            agent = LightweightDataCleaningAgent(model=llm, log=True)
+            agent = LightweightDataCleaningAgent(model=llm)
             df_input = df_uploaded.copy()
             df_input.insert(0, AGENT_ROW_ID, _synthetic_row_id_series(df_input.index))
             raw_ui = st.session_state.get("cleaning_user_instructions")
             user_instructions = (
                 raw_ui.strip() if isinstance(raw_ui, str) and raw_ui.strip() else None
             )
-            agent.generate_cleaning_code(
+            agent.generate_cleaning_plan(
                 source_df=df_input,
                 user_instructions=user_instructions,
             )
-            st.session_state["pending_cleaner_code"] = agent.get_data_cleaner_function()
-            st.session_state["pending_function_name"] = (
-                agent.response.get("data_cleaner_function_name")
-                if agent.response
-                else "data_cleaner"
+            plan = agent.get_cleaning_plan()
+            if plan is None:
+                st.error("Failed to generate a cleaning plan.")
+            else:
+                st.session_state["pending_cleaning_plan"] = plan
+                st.session_state["preview_df_input"] = df_input
+                st.session_state.pop("preview_df_cleaned", None)
+        if st.session_state.get("pending_cleaning_plan") is not None:
+            st.success(
+                "Cleaning plan generated. Expand the plan section below to "
+                "review, then apply when ready."
             )
-            st.session_state["preview_df_input"] = df_input
-            st.session_state.pop("preview_df_cleaned", None)
-        st.success(
-            "Cleaning code generated. Expand the cleaning code section below to "
-            "review, then apply when ready."
-        )
 
-    pending_code = st.session_state.get("pending_cleaner_code")
+    pending_plan = st.session_state.get("pending_cleaning_plan")
     df_input_stored = st.session_state.get("preview_df_input")
 
-    if pending_code and df_input_stored is not None:
-        with st.expander("Generated cleaning code", expanded=False):
-            st.code(pending_code, language="python")
+    if pending_plan and df_input_stored is not None:
+        plan_json = json.dumps(
+            {
+                "skip_steps": list(pending_plan.skip_steps),
+                "protected_columns": list(pending_plan.protected_columns),
+                "drop_high_missing_threshold": pending_plan.drop_high_missing_threshold,
+                "coerce_datetime_columns": list(pending_plan.coerce_datetime_columns),
+                "coerce_numeric_columns": list(pending_plan.coerce_numeric_columns),
+                "coerce_bool_columns": list(pending_plan.coerce_bool_columns),
+                "impute_numeric_columns": list(pending_plan.impute_numeric_columns),
+                "impute_categorical_columns": list(
+                    pending_plan.impute_categorical_columns
+                ),
+            },
+            indent=2,
+        )
+        with st.expander("Generated cleaning plan", expanded=False):
+            st.markdown("**Pipeline steps**")
+            st.markdown(_format_pipeline_step_summary(pending_plan))
+            st.markdown("**Plan JSON**")
+            st.code(plan_json, language="json")
 
         if st.button("Apply Cleaning"):
             apply_err: str | None = None
             with st.spinner("Applying cleaning..."):
-                fn_work = (
-                    st.session_state.get("pending_function_name") or "data_cleaner"
-                )
-                code_work = pending_code
-                df_pre, err = run_cleaner_code_on_dataframe(
-                    code_work,
-                    df_input_stored,
-                    function_name=fn_work,
-                )
-                if err:
-                    apply_err = str(err)
-                elif df_pre is None:
-                    apply_err = "cleaner returned no result"
+                from data_cleaning_agent.cleaning_pipeline import run_cleaning_pipeline
+
+                try:
+                    df_pre, _trace = run_cleaning_pipeline(
+                        df_input_stored,
+                        pending_plan,
+                        row_id_col=AGENT_ROW_ID,
+                    )
+                except Exception as exc:
+                    apply_err = str(exc)
                 else:
                     st.session_state["preview_df_cleaned"] = _normalize_cleaned_row_id(
                         df_pre
@@ -141,7 +172,7 @@ if uploaded_file:
     if "preview_df_input" in st.session_state:
         st.subheader("Cleaned Data")
         if df_cleaned_stored is None:
-            st.info("Generate cleaning code and apply to see results here.")
+            st.info("Generate a cleaning plan and apply to see results here.")
             st.download_button(
                 "Download Cleaned Data",
                 data="",

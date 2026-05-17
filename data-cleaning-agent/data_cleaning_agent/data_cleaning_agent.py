@@ -1,174 +1,109 @@
 # Libraries
+
 import logging
-import os
-from pathlib import Path
+from dataclasses import asdict
 from typing import Required, TypedDict
 
+import langchain_core.runnables as langchain_runnables
+import langgraph.graph as langgraph_graph
+import langgraph.types as langgraph_types
 import pandas as pd
-from langchain_core.prompts import PromptTemplate
-from langchain_core.runnables import RunnableConfig
-from langgraph.graph import END, StateGraph
-from langgraph.types import Checkpointer
 
-from .utils import (
-    PythonOutputParser,
-    execute_agent_code,
-    fix_agent_code,
-    format_dataframe_summary,
-    get_dataframe_summary,
-)
+import data_cleaning_agent.cleaning_pipeline as cleaning_pipeline
+import data_cleaning_agent.cleaning_plan as cleaning_plan
+import data_cleaning_agent.plan_generation as plan_generation
 
 # Setup
+
 logger = logging.getLogger(__name__)
+
 AGENT_NAME = "lightweight_data_cleaning_agent"
-LOG_PATH = os.path.join(os.getcwd(), "logs/")
-
-
-_PIPELINE_PROMPT_PATH = Path(__file__).parent / "prompts" / "data_cleaning.md"
-_PIPELINE_PROMPT_TEMPLATE = _PIPELINE_PROMPT_PATH.read_text(encoding="utf-8")
-
-_FIX_PROMPT_PATH = Path(__file__).parent / "prompts" / "data_cleaning_fix.md"
-_FIX_DATA_CLEANER_PROMPT_TEMPLATE = _FIX_PROMPT_PATH.read_text(encoding="utf-8")
-
-
-def _run_data_cleaning_generation(
-    model,
-    *,
-    user_instructions: str | None,
-    source_df: pd.DataFrame,
-    function_name: str,
-    log: bool,
-    log_dir: str,
-    file_name: str,
-) -> dict:
-    """
-    Invoke the cleaning LLM once to produce Python cleaning code.
-
-    Parameters
-    ----------
-    model
-        LangChain chat model.
-    user_instructions : str or None
-        End-user cleaning instructions.
-    source_df : pd.DataFrame
-        Data used only for summary statistics in the prompt.
-    function_name : str
-        Generated function name.
-    log : bool
-        Whether to write code to disk.
-    log_dir : str
-        Directory for log files when ``log`` is True.
-    file_name : str
-        File name when ``log`` is True.
-
-    Returns
-    -------
-    dict
-        Keys: ``data_cleaner_function``, ``data_cleaner_function_path``,
-        ``data_cleaner_function_name``.
-    """
-    summary = get_dataframe_summary(source_df)
-    dataset_summary = format_dataframe_summary(summary)
-    ui = user_instructions or "Follow the basic cleaning steps."
-
-    code_prompt = PromptTemplate(
-        template=_PIPELINE_PROMPT_TEMPLATE,
-        input_variables=[
-            "user_instructions",
-            "all_datasets_summary",
-            "function_name",
-        ],
-    )
-    msg_code = (code_prompt | model).invoke({
-        "user_instructions": ui,
-        "all_datasets_summary": dataset_summary,
-        "function_name": function_name,
-    })
-    parser = PythonOutputParser()
-    code = parser.parse(msg_code.text)
-
-    file_path = None
-    if log:
-        file_path = os.path.join(log_dir, file_name)
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(code)
-        logger.info("Code saved to: %s", file_path)
-    return {
-        "data_cleaner_function": code,
-        "data_cleaner_function_path": file_path,
-        "data_cleaner_function_name": function_name,
-    }
 
 
 # State schema for the workflow graph. total=False because nodes incrementally
-# populate keys (data_cleaner_function, data_cleaned, data_cleaner_error, ...)
+
+# populate keys (cleaning_plan, data_cleaned, data_cleaner_error, ...)
+
 # during the run rather than requiring all keys up front.
+
+
 class GraphState(TypedDict, total=False):
     user_instructions: Required[str | None]
+
     source_df: Required[dict]
+
     max_retries: Required[int]
+
     retry_count: Required[int]
+
     data_cleaned: dict
-    data_cleaner_function: str
-    data_cleaner_function_path: str
-    data_cleaner_function_name: str
+
+    cleaning_plan: dict
+
+    cleaning_plan_error: str
+
     data_cleaner_error: str
 
 
 class LightweightDataCleaningAgent:
     """
-    LLM-powered agent that generates and executes Python code to clean pandas DataFrames.
 
-    Uses an LLM to create data cleaning functions based on user instructions. The agent
-    automatically retries with error correction if the generated code fails.
+    LLM-powered agent that produces a JSON cleaning plan and runs the hybrid pipeline.
 
-    Prompt sources: ``data_cleaning.md`` (Python generation pipeline),
-    ``data_cleaning_fix.md`` (error correction).
+
+
+    Uses an LLM to build a :class:`~data_cleaning_agent.cleaning_plan.CleaningPlan`
+
+    from user instructions, then executes fixed-order steps via
+
+    :func:`~data_cleaning_agent.cleaning_pipeline.run_cleaning_pipeline`. The graph
+
+    retries with plan correction on validation or runtime errors.
+
+
+
+    Prompt sources: ``data_cleaning_plan.md``, ``data_cleaning_plan_fix.md``.
+
+
 
     Parameters
+
     ----------
+
     model : LLM
-        Language model for generating cleaning code (e.g., ChatOpenAI).
-    log : bool, default=False
-        Whether to save generated code to a file.
-    log_path : str, optional
-        Directory for log files. Defaults to './logs/' if log=True and not specified.
-    file_name : str, default="data_cleaner.py"
-        Name of the log file when log=True.
-    function_name : str, default="data_cleaner"
-        Name of the generated cleaning function.
+
+        Language model for generating cleaning plans (e.g., ChatOpenAI).
+
     checkpointer : Checkpointer, optional
+
         LangGraph checkpointer for saving agent state.
 
+
+
     Attributes
+
     ----------
+
     response : dict or None
+
         Stores the full response after invoke_agent() is called.
+
     """
 
     def __init__(
         self,
         model,
-        log=False,
-        log_path=None,
-        file_name="data_cleaner.py",
-        function_name="data_cleaner",
-        checkpointer: Checkpointer = None,
+        checkpointer: langgraph_types.Checkpointer = None,
     ):
+
         self.model = model
-        self.log = log
-        self.log_path = log_path
-        self.file_name = file_name
-        self.function_name = function_name
+
         self.checkpointer = checkpointer
+
         self.response = None
-        # Build the LangGraph workflow with code generation, execution, and error fixing nodes
+
         self._compiled_graph = make_lightweight_data_cleaning_agent(
             model=model,
-            log=log,
-            log_path=log_path,
-            file_name=file_name,
-            function_name=function_name,
             checkpointer=checkpointer,
         )
 
@@ -178,124 +113,184 @@ class LightweightDataCleaningAgent:
         user_instructions: str | None = None,
         max_retries: int = 3,
         retry_count: int = 0,
-        config: RunnableConfig | None = None,
+        config: langchain_runnables.RunnableConfig | None = None,
     ) -> None:
         """
-        Generate and execute data cleaning code on the provided DataFrame.
+
+        Generate a cleaning plan and run the hybrid pipeline on the provided DataFrame.
+
+
 
         Parameters
+
         ----------
+
         source_df : pd.DataFrame
-            Raw dataset to clean.
+
+            Raw dataset to clean (should include ``DEFAULT_ROW_ID_COL`` when used
+
+            from the Streamlit app).
+
         user_instructions : str, optional
+
             Free-form cleaning instructions from the end user. Columns named
+
             here are treated as protected and exempt from drops and destructive
+
             transforms. When None, the agent applies its full default pipeline.
-            The default pipeline text lives in
-            ``data_cleaning_agent/prompts/data_cleaning.md``.
+
         max_retries : int, default=3
-            Maximum number of retry attempts if generated code fails.
+
+            Maximum number of retry attempts if plan execution fails.
+
         retry_count : int, default=0
+
             Starting retry count (typically left at 0).
+
         config : RunnableConfig, optional
+
             LangChain runtime config (e.g. ``{"configurable": {"thread_id": ...}}``)
+
             forwarded to the underlying graph ``invoke`` call.
 
+
+
         Returns
+
         -------
+
         None
+
             Results are stored in self.response and accessed via getter methods.
+
         """
+
         initial_state: GraphState = {
             "user_instructions": user_instructions,
             "source_df": source_df.to_dict(),
             "max_retries": max_retries,
             "retry_count": retry_count,
         }
+
         self.response = self._compiled_graph.invoke(initial_state, config=config)
 
     def get_data_cleaned(self):
         """
+
         Retrieves the cleaned data stored after running invoke_agent.
+
         """
+
         if self.response:
             return pd.DataFrame(self.response.get("data_cleaned"))
 
     def get_input_dataframe(self):
         """
+
         Retrieves the input (pre-cleaning) dataframe from the last response.
+
         """
+
         if self.response:
             return pd.DataFrame(self.response.get("source_df"))
 
-    def get_data_cleaner_function(self):
-        """
-        Retrieves the agent's cleaning function code.
-        """
-        if self.response:
-            return self.response.get("data_cleaner_function")
+    def get_cleaning_plan(self) -> cleaning_plan.CleaningPlan | None:
+        """Return the parsed cleaning plan from the last run, if any."""
 
-    def generate_cleaning_code(
+        plan_dict = self.response.get("cleaning_plan") if self.response else None
+
+        if plan_dict is None:
+            return None
+
+        return cleaning_plan.CleaningPlan(**plan_dict)
+
+    def generate_cleaning_plan(
         self,
         source_df: pd.DataFrame,
         user_instructions: str | None = None,
     ) -> None:
         """
-        Run the LLM once to produce cleaning code (no execution).
 
-        Stores partial results on ``self.response`` (code, function name). Call
-        :meth:`execute_stored_cleaning` when the host app is ready to run the code.
+        Run the LLM once to produce a cleaning plan (no pipeline execution).
+
+
+
+        Stores partial results on ``self.response``. Call
+
+        :meth:`execute_stored_cleaning` when the host app is ready to apply the plan.
+
         """
-        log_dir = self.log_path if self.log_path is not None else LOG_PATH
-        if self.log and not os.path.exists(log_dir):
-            os.makedirs(log_dir)
-        gen = _run_data_cleaning_generation(
+
+        plan = plan_generation.generate_cleaning_plan(
             self.model,
-            user_instructions=user_instructions,
-            source_df=source_df,
-            function_name=self.function_name,
-            log=self.log,
-            log_dir=log_dir,
-            file_name=self.file_name,
+            source_df,
+            user_instructions,
+            row_id_col=cleaning_plan.DEFAULT_ROW_ID_COL,
         )
+
         self.response = {
-            **gen,
+            "cleaning_plan": asdict(plan),
             "retry_count": 0,
         }
 
     def execute_stored_cleaning(self, source_df: pd.DataFrame) -> dict:
         """
-        Execute the code from the last ``generate_cleaning_code`` (or graph output).
+
+        Run the hybrid pipeline from the last :meth:`generate_cleaning_plan` step.
+
+
 
         Returns
+
         -------
+
         dict
-            Keys ``data_cleaned`` and ``data_cleaner_error`` as returned by
-            :func:`execute_agent_code`.
+
+            Keys ``data_cleaned`` and ``data_cleaner_error``.
+
         """
-        if not self.response or not self.response.get("data_cleaner_function"):
-            msg = "Call generate_cleaning_code (or invoke_agent) before execute_stored_cleaning."
+
+        if not self.response:
+            msg = (
+                "Call generate_cleaning_plan or invoke_agent "
+                "before execute_stored_cleaning."
+            )
+
             raise ValueError(msg)
-        fn = self.response.get("data_cleaner_function_name") or self.function_name
-        state = {
-            "source_df": source_df.to_dict(),
-            "data_cleaner_function": self.response["data_cleaner_function"],
-            "data_cleaner_function_name": fn,
-        }
-        exec_out = execute_agent_code(
-            state=state,
-            data_key="source_df",
-            result_key="data_cleaned",
-            error_key="data_cleaner_error",
-            code_snippet_key="data_cleaner_function",
-            agent_function_name=fn,
-        )
+
+        plan_dict = self.response.get("cleaning_plan")
+
+        if plan_dict is None:
+            msg = (
+                "Call generate_cleaning_plan or invoke_agent "
+                "before execute_stored_cleaning."
+            )
+
+            raise ValueError(msg)
+
+        plan = cleaning_plan.CleaningPlan(**plan_dict)
+
+        try:
+            cleaned, _trace = cleaning_pipeline.run_cleaning_pipeline(
+                source_df,
+                plan,
+                row_id_col=cleaning_plan.DEFAULT_ROW_ID_COL,
+            )
+
+            exec_out = {
+                "data_cleaned": cleaned.to_dict(),
+                "data_cleaner_error": None,
+            }
+
+        except Exception as exc:
+            exec_out = {"data_cleaner_error": str(exc)}
+
         self.response = {
             **self.response,
             **exec_out,
-            "source_df": state["source_df"],
-            "data_cleaner_function_name": fn,
+            "source_df": source_df.to_dict(),
         }
+
         return exec_out
 
 
@@ -304,124 +299,174 @@ class LightweightDataCleaningAgent:
 
 def make_lightweight_data_cleaning_agent(
     model,
-    log=False,
-    log_path=None,
-    file_name="data_cleaner.py",
-    function_name="data_cleaner",
-    checkpointer: Checkpointer = None,
+    checkpointer: langgraph_types.Checkpointer = None,
 ):
     """
+
     Factory function that creates a compiled LangGraph workflow for data cleaning.
 
-    Builds a state graph with three nodes: code generation, execution, and error fixing.
-    The workflow automatically retries with corrections if generated code fails.
+
+
+    Builds a state graph with three nodes: plan generation, pipeline execution, and
+
+    plan correction. The workflow automatically retries with corrections on failure.
+
+
 
     Parameters
+
     ----------
+
     model : LLM
-        Language model for generating cleaning code.
-    log : bool, default=False
-        Whether to save generated code to a file.
-    log_path : str, optional
-        Directory for log files. Defaults to './logs/' if log=True and not specified.
-    file_name : str, default="data_cleaner.py"
-        Name of the log file when log=True.
-    function_name : str, default="data_cleaner"
-        Name of the generated cleaning function.
+
+        Language model for generating cleaning plans.
+
     checkpointer : Checkpointer, optional
+
         LangGraph checkpointer for saving workflow state.
 
+
+
     Returns
+
     -------
+
     CompiledStateGraph
+
         Compiled LangGraph workflow ready to process cleaning requests.
+
     """
-    # Setup Log Directory
-    log_dir: str = log_path if log_path is not None else LOG_PATH
-    if log and not os.path.exists(log_dir):
-        os.makedirs(log_dir)
 
-    def create_data_cleaner_code(state: GraphState):
-        """
-        Generate the data cleaning code based on user instructions.
-        """
-        logger.info("Creating data cleaner code")
+    def create_cleaning_plan(state: GraphState):
+        """Generate a validated cleaning plan from user instructions."""
 
-        source_df = state["source_df"]
-        df = pd.DataFrame.from_dict(source_df)
+        logger.info("Creating cleaning plan")
 
-        return _run_data_cleaning_generation(
-            model,
-            user_instructions=state.get("user_instructions"),
-            source_df=df,
-            function_name=function_name,
-            log=log,
-            log_dir=log_dir,
-            file_name=file_name,
-        )
+        df = pd.DataFrame.from_dict(state["source_df"])
 
-    def execute_data_cleaner_code(state):
-        """
-        Execute the generated cleaning code on the data.
-        """
-        return execute_agent_code(
-            state=state,
-            data_key="source_df",
-            result_key="data_cleaned",
-            error_key="data_cleaner_error",
-            code_snippet_key="data_cleaner_function",
-            agent_function_name=state.get("data_cleaner_function_name"),
-        )
+        try:
+            plan = plan_generation.generate_cleaning_plan(
+                model,
+                df,
+                state.get("user_instructions"),
+                row_id_col=cleaning_plan.DEFAULT_ROW_ID_COL,
+            )
 
-    def fix_data_cleaner_code(state: GraphState):
-        """
-        Fix errors in the generated data cleaning code.
-        """
-        return fix_agent_code(
-            state=state,
-            code_snippet_key="data_cleaner_function",
-            error_key="data_cleaner_error",
-            llm=model,
-            prompt_template=_FIX_DATA_CLEANER_PROMPT_TEMPLATE,
-            function_name=state.get("data_cleaner_function_name"),
-            output_parser=PythonOutputParser(),
-        )
+        except Exception as exc:
+            logger.exception("Failed to generate cleaning plan")
 
-    # Build the workflow graph
-    workflow = StateGraph(GraphState)
+            return {"cleaning_plan_error": str(exc)}
 
-    # Add nodes
-    workflow.add_node("create_data_cleaner_code", create_data_cleaner_code)
-    workflow.add_node("execute_data_cleaner_code", execute_data_cleaner_code)
-    workflow.add_node("fix_data_cleaner_code", fix_data_cleaner_code)
+        return {
+            "cleaning_plan": asdict(plan),
+            "cleaning_plan_error": None,
+        }
 
-    # Set entry point
-    workflow.set_entry_point("create_data_cleaner_code")
+    def execute_cleaning_plan(state: GraphState):
+        """Run the hybrid pipeline using the plan in state."""
 
-    # Add edges
-    workflow.add_edge("create_data_cleaner_code", "execute_data_cleaner_code")
-    workflow.add_edge("fix_data_cleaner_code", "execute_data_cleaner_code")
+        logger.info("Executing cleaning plan")
 
-    # Conditional routing: retry with fixes if error occurs and retries remain
+        if state.get("cleaning_plan_error"):
+            return {"data_cleaner_error": state["cleaning_plan_error"]}
+
+        plan_dict = state.get("cleaning_plan")
+
+        if not plan_dict:
+            return {"data_cleaner_error": "missing cleaning plan"}
+
+        df = pd.DataFrame.from_dict(state["source_df"])
+
+        plan = cleaning_plan.CleaningPlan(**plan_dict)
+
+        try:
+            cleaned, _trace = cleaning_pipeline.run_cleaning_pipeline(
+                df,
+                plan,
+                row_id_col=cleaning_plan.DEFAULT_ROW_ID_COL,
+            )
+
+        except Exception as exc:
+            logger.exception("Failed to execute cleaning plan")
+
+            return {"data_cleaner_error": str(exc)}
+
+        return {
+            "data_cleaned": cleaned.to_dict(),
+            "data_cleaner_error": None,
+        }
+
+    def fix_cleaning_plan(state: GraphState):
+        """Fix a broken cleaning plan using the LLM."""
+
+        logger.info("Fixing cleaning plan")
+
+        df = pd.DataFrame.from_dict(state["source_df"])
+
+        error = state.get("data_cleaner_error") or state.get("cleaning_plan_error")
+
+        if not error:
+            return {"retry_count": state.get("retry_count", 0) + 1}
+
+        try:
+            plan = plan_generation.fix_cleaning_plan(
+                model,
+                df,
+                broken_plan=state.get("cleaning_plan"),
+                error=error,
+                user_instructions=state.get("user_instructions"),
+                row_id_col=cleaning_plan.DEFAULT_ROW_ID_COL,
+            )
+
+        except Exception as exc:
+            logger.exception("Failed to fix cleaning plan")
+
+            return {
+                "cleaning_plan_error": str(exc),
+                "data_cleaner_error": str(exc),
+                "retry_count": state.get("retry_count", 0) + 1,
+            }
+
+        return {
+            "cleaning_plan": asdict(plan),
+            "cleaning_plan_error": None,
+            "data_cleaner_error": None,
+            "retry_count": state.get("retry_count", 0) + 1,
+        }
+
+    workflow = langgraph_graph.StateGraph(GraphState)
+
+    workflow.add_node("create_cleaning_plan", create_cleaning_plan)
+
+    workflow.add_node("execute_cleaning_plan", execute_cleaning_plan)
+
+    workflow.add_node("fix_cleaning_plan", fix_cleaning_plan)
+
+    workflow.set_entry_point("create_cleaning_plan")
+
+    workflow.add_edge("create_cleaning_plan", "execute_cleaning_plan")
+
+    workflow.add_edge("fix_cleaning_plan", "execute_cleaning_plan")
+
     def should_retry(state):
+
         has_error = state.get("data_cleaner_error") is not None
+
         can_retry = (
             state.get("retry_count") is not None
             and state.get("max_retries") is not None
             and state["retry_count"] < state["max_retries"]
         )
-        return "fix_code" if (has_error and can_retry) else "end"
+
+        return "fix_plan" if (has_error and can_retry) else "end"
 
     workflow.add_conditional_edges(
-        "execute_data_cleaner_code",
+        "execute_cleaning_plan",
         should_retry,
         {
-            "fix_code": "fix_data_cleaner_code",
-            "end": END,
+            "fix_plan": "fix_cleaning_plan",
+            "end": langgraph_graph.END,
         },
     )
 
-    # Compile the workflow
-    app = workflow.compile(checkpointer=checkpointer, name=AGENT_NAME)
-
-    return app
+    return workflow.compile(checkpointer=checkpointer, name=AGENT_NAME)

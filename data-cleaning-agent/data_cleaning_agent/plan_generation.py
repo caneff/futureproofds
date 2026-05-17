@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 _PLAN_PROMPT_PATH = Path(__file__).parent / "prompts" / "data_cleaning_plan.md"
 PLAN_PROMPT_TEMPLATE = _PLAN_PROMPT_PATH.read_text(encoding="utf-8")
 
+_FIX_PLAN_PROMPT_PATH = Path(__file__).parent / "prompts" / "data_cleaning_plan_fix.md"
+FIX_PLAN_PROMPT_TEMPLATE = _FIX_PLAN_PROMPT_PATH.read_text(encoding="utf-8")
+
 _PIPELINE_STEP_IDS_TEXT = ", ".join(step.value for step in PIPELINE_STEP_ORDER)
 _STR_OUTPUT_PARSER = StrOutputParser()
 _JSON_OUTPUT_PARSER = JsonOutputParser()
@@ -127,6 +130,52 @@ def generate_cleaning_plan(
         user_instructions=ui,
         dataset_summary=dataset_summary,
         example_plan=example,
+        row_id_col=row_id_col,
+    )
+    raw: str = (model | _STR_OUTPUT_PARSER).invoke(prompt)
+    plan = parse_cleaning_plan_json(raw)
+    validate_cleaning_plan(plan, summary, row_id_col=row_id_col)
+    return plan
+
+
+def render_fix_plan_prompt(
+    *,
+    user_instructions: str,
+    dataset_summary: str,
+    plan_snippet: str,
+    error: str,
+    row_id_col: str = DEFAULT_ROW_ID_COL,
+) -> str:
+    """Render the plan-fix prompt with runtime values."""
+    return FIX_PLAN_PROMPT_TEMPLATE.format(
+        user_instructions=user_instructions,
+        all_datasets_summary=dataset_summary,
+        pipeline_step_ids=_PIPELINE_STEP_IDS_TEXT,
+        plan_snippet=plan_snippet,
+        error=error,
+        row_id_col=row_id_col,
+    )
+
+
+def fix_cleaning_plan(
+    model: Any,
+    source_df: pd.DataFrame,
+    *,
+    broken_plan: dict | None,
+    error: str,
+    user_instructions: str | None = None,
+    row_id_col: str = DEFAULT_ROW_ID_COL,
+) -> CleaningPlan:
+    """Ask the LLM to correct a plan that failed validation or pipeline execution."""
+    summary = get_dataframe_summary(source_df)
+    ui = user_instructions or "Follow the basic cleaning steps."
+    dataset_summary = format_dataframe_summary(summary)
+    plan_snippet = json.dumps(broken_plan or {}, indent=2)
+    prompt = render_fix_plan_prompt(
+        user_instructions=ui,
+        dataset_summary=dataset_summary,
+        plan_snippet=plan_snippet,
+        error=error,
         row_id_col=row_id_col,
     )
     raw: str = (model | _STR_OUTPUT_PARSER).invoke(prompt)
