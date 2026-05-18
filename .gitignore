@@ -1,7 +1,4 @@
-# Local brainstorm visual companion sessions (superpowers)
-.superpowers/
-
-# Local docs (specs/plans live under ~/.cursor/superpowers/, not in-repo)
+# Local docs (not committed)
 docs/
 
 __pycache__/
